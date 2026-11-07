@@ -24,8 +24,8 @@ def fake_invoker(outputs):
 
 
 @pytest.fixture
-def client():
-    return TestClient(create_app(LocalMemoryStore(), internal_token=TOKEN))
+def client(store):  # runs every test below against memory AND MOCKED DynamoDB (and real, if configured)
+    return TestClient(create_app(store, internal_token=TOKEN))
 
 
 def activate(client, d=None, **kw):
@@ -260,3 +260,107 @@ def test_request_permission_and_finish_task_are_conditional(client):
     assert lim["reason_code"] == "TOOL_CALL_LIMIT_EXCEEDED"   # limits apply (denied calls count)
     client.post(f"/api/runs/{run['run_id']}/stop")
     assert authz(client, req(run, c, "finish_task", {"summary": "x"}, "f3")).json()["reason_code"] == "RUN_NOT_ACTIVE"
+
+
+# ---- DynamoDB-era additions (run on every store) -------------------------
+def test_internal_state_transition_completed_and_failed(client):
+    c = activate(client); run = start_run(client, c)
+    r = client.post(f"/internal/runs/{run['run_id']}/state", headers=H, json={"status": "completed", "reason": "agent finished"})
+    assert r.status_code == 200 and r.json()["transitioned"] is True and r.json()["run"]["status"] == "completed"
+    assert r.json()["run"]["completed_at"]
+    again = client.post(f"/internal/runs/{run['run_id']}/state", headers=H, json={"status": "failed"}).json()
+    assert again["transitioned"] is False and again["run"]["status"] == "completed"   # first writer wins
+    d = authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"})).json()
+    assert d["reason_code"] == "RUN_NOT_ACTIVE"
+    evs = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
+    assert [e["event_type"] for e in evs].count("run_completed") == 1
+    assert client.post(f"/internal/runs/{run['run_id']}/state", json={"status": "completed"}).status_code == 401
+    assert client.post(f"/internal/runs/{run['run_id']}/state", headers=H, json={"status": "active"}).status_code == 422
+
+
+def test_stop_then_complete_does_not_overwrite_stop(client):
+    c = activate(client); run = start_run(client, c)
+    client.post(f"/api/runs/{run['run_id']}/stop")
+    r = client.post(f"/internal/runs/{run['run_id']}/state", headers=H, json={"status": "completed"}).json()
+    assert r["transitioned"] is False and r["run"]["status"] == "stopped"
+
+
+def test_event_ids_and_seq_stable_across_reads(client):
+    c = activate(client); run = start_run(client, c)
+    authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"}))
+    a = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
+    b = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
+    assert a == b and [e["seq"] for e in a] == [1, 2]
+    assert client.get(f"/api/runs/{run['run_id']}/events?after_seq=1").json()["events"][0]["seq"] == 2
+
+
+def test_tool_limit_is_exact_under_concurrent_requests(store):
+    import threading
+    from intentlock_api import service
+    from intentlock_api.store import now
+    from intentlock_policy.models import MissionContract, Run
+    d = json.loads((FIX / "contract.json").read_text()); d["limits"]["max_tool_calls"] = 5
+    d.update(contract_id="c_conc_" + SHA[:6] + str(time.time_ns()), version=1)
+    c = MissionContract.model_validate(d); store.put_contract(c)
+    t = now(); r = Run(run_id="run_conc_" + str(time.time_ns()), contract_id=c.contract_id, contract_version=1,
+                       status="active", base_commit=c.base_commit, created_at=t, started_at=t)
+    store.put_run(r)
+    body = {"request_id": "x", "run_id": r.run_id, "contract_id": c.contract_id, "contract_version": 1,
+            "tool": "read_file", "arguments": {"path": "src/auth/a.ts"}, "agent_id": "a", "timestamp": "2026-11-07T10:00:00Z"}
+    out = []
+    ts = [threading.Thread(target=lambda: out.append(service.authorize_request(dict(body), store))) for _ in range(12)]
+    [x.start() for x in ts]; [x.join() for x in ts]
+    allowed = [o for o in out if o.decision == "allow"]
+    limited = [o for o in out if o.reason_code == "TOOL_CALL_LIMIT_EXCEEDED"]
+    assert len(allowed) == 5 and len(limited) == 7
+    seqs = [e.seq for e in store.list_events(r.run_id)]
+    assert seqs == list(range(1, 13))                      # one gap-free event per request
+
+
+def test_stop_during_evaluation_turns_allow_into_deny(store, monkeypatch):
+    from intentlock_api import service
+    from intentlock_api.store import now
+    from intentlock_policy.models import MissionContract, Run
+    d = json.loads((FIX / "contract.json").read_text()); d.update(contract_id="c_toctou_" + str(time.time_ns()), version=1)
+    c = MissionContract.model_validate(d); store.put_contract(c)
+    t = now(); r = Run(run_id="run_toctou_" + str(time.time_ns()), contract_id=c.contract_id, contract_version=1,
+                       status="active", base_commit=c.base_commit, created_at=t, started_at=t)
+    store.put_run(r)
+    real = service.authorize
+    def stop_midway(*a, **k):
+        dec = real(*a, **k)
+        service.stop_run_state(store, r.run_id, "stopped", "user")   # a stop lands after the policy said ALLOW
+        return dec
+    monkeypatch.setattr(service, "authorize", stop_midway)
+    body = {"request_id": "x", "run_id": r.run_id, "contract_id": c.contract_id, "contract_version": 1,
+            "tool": "read_file", "arguments": {"path": "src/auth/a.ts"}, "agent_id": "a", "timestamp": "2026-11-07T10:00:00Z"}
+    dec = service.authorize_request(body, store)
+    assert (dec.decision, dec.reason_code) == ("deny", "RUN_NOT_ACTIVE")
+    ev = [e for e in store.list_events(r.run_id) if e.event_type == "tool_request"][0]
+    assert ev.decision == "deny"                                       # recorded decision matches what was returned
+
+
+def test_dynamo_items_contain_no_secrets_or_patch_text(client, store):
+    if not hasattr(store, "_t"):
+        pytest.skip("memory store has no items to scan")
+    c = activate(client); run = start_run(client, c)
+    secret = "ZZTOPSECRETPATCHBODYZZ"
+    patch = f"diff --git a/src/auth/a.ts b/src/auth/a.ts\n--- a/src/auth/a.ts\n+++ b/src/auth/a.ts\n@@ -1 +1 @@\n-a\n+{secret}\n"
+    assert authz(client, req(run, c, "propose_patch", {"patch": patch})).json()["decision"] == "allow"
+    authz(client, req(run, c, "read_file", {"path": ".env"}, "r2"))
+    items = store._t.query(KeyConditionExpression="pk = :p", ExpressionAttributeValues={":p": f"RUN#{run['run_id']}"}, ConsistentRead=True)["Items"]
+    dump = json.dumps(items, default=str)
+    assert secret not in dump and "TOKEN" not in dump.upper().replace("TOKENS", "")
+    assert "patch_sha256" in dump
+
+
+def test_store_failure_fails_closed_on_authorize(client, store, monkeypatch):
+    c = activate(client); run = start_run(client, c)
+    def boom(*a, **k): raise RuntimeError("dynamodb down")
+    monkeypatch.setattr(store, "reserve_tool_call", boom)
+    r = authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"}))
+    assert r.status_code == 200 and r.json()["decision"] == "deny" and r.json()["reason_code"] == "POLICY_ENGINE_ERROR"
+
+
+def test_health_reports_store_backend(client, store):
+    assert client.get("/health").json()["store"] == store.backend
