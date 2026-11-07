@@ -8,7 +8,7 @@
 ## 2. Last Updated
 - UTC: 2026-11-07
 - Branch: `Ali-Person-1` (the PRD calls it `person1-control-plane`; actual name is `Ali-Person-1`)
-- Commit: see `git log -1` on `Ali-Person-1` (latest work: merge of `codex/ali-review-safeguards` `dae9b09`, reviewer-auth hardening `d135442`, dashboard header fix). Earlier: `7b04b3e`, `055ebb9`, `9a15fb9`, `9ac6ea1`, `8064936`, `57d3c5c`, `a66614d`
+- Commit: see `git log -1` on `Ali-Person-1`; code/template DEPLOYED to AWS from `3105520` (2026-11-07). Earlier: `2472e40`, `7b04b3e`, `9a15fb9`
 - Schema version: `0.1.0` (PROPOSED — not yet agreed with Person 2)
 
 ## 3. Current Status
@@ -222,20 +222,16 @@ Outdated assumptions found: Person 2's older handoff text said no completion end
 Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `PermissionError` in `lifecycle.terminate_group` (still present in their source: no `PermissionError` handling); (b) no SIGTERM handler in their runner (my backstop uses SIGINT first); (c) `launch_kiro.py` passes the prompt as the final positional Kiro argument without `--`, so a mission starting with `-` might be parsed as an option (unverified) — suggest adding `--` or rejecting such missions; (d) their control-plane client uses a 2 s HTTP timeout and treats timeouts as `POLICY_ENGINE_ERROR`/lost control plane (which terminates the agent): `/internal/authorize` makes about 9 sequential DynamoDB calls, so latency from a laptop to real DynamoDB in `us-east-1` is UNMEASURED and could approach that limit — measure before the DynamoDB-backed demo, or run the API with the memory store / in-region; (e) tool exposure of Kiro (built-in tools) still unverified.
 
 ## 10. AWS Configuration
-**One shared AWS account** (owned by Kavin): account `247495661854`, region `us-east-1`, IAM user `aparpia`, CLI profile `intentlock`, single environment. Stacks: Person 1 `intentlock-control-plane-dev`; Person 2 (proposed) `intentlock-execution-plane-dev`. Ownership/naming table: `infrastructure/control-plane/README.md` ("ONE shared AWS account"). **No credentials are stored in this repo or this file** (tracked files and full history scanned clean). The previously exposed access key must be deactivated by Kavin and never reused. The unrelated `default` profile is never used.
-| Item | State (2026-11-07) |
+**DEPLOYED (owner-approved, 2026-11-07).** Shared account `247495661854`, `us-east-1`, profile `intentlock` (user `aparpia`, currently AdministratorAccess). Stack `intentlock-control-plane-dev` is `CREATE_COMPLETE`: DynamoDB table `intentlock-control-plane`, Lambda `intentlock-authorizer`, log group `/aws/lambda/intentlock-authorizer`, IAM role `intentlock-control-plane-dev-AuthorizerRole-qgkrDMazxU83` + 2 managed policies; plus bucket `intentlock-code-247495661854-us-east-1` (private, encrypted, TLS-only). Full identifiers, verification, REAL-vs-mocked results, latency, risks and the Bedrock inspection: `infrastructure/control-plane/README.md` ("DEPLOYED 2026-11-07"). No credentials are stored in the repo or this file.
+| Item | State |
 |---|---|
-| AWS CLI | Installed (`aws-cli/2.36.40`). |
-| Profile `intentlock` | **Configured and working** (region `us-east-1`, output `json`; key id 20 chars, secret 40 chars; values never read or stored in the repo). The unrelated `default` profile was not used. |
-| Identity | **VERIFIED:** `sts get-caller-identity --profile intentlock` → account `247495661854` (matches), IAM user `aparpia` (matches), principal type user, region `us-east-1`. |
-| Service access (read-only) | **VERIFIED 15/15** with profile `intentlock` (DynamoDB, Lambda, S3, CloudFormation incl. `validate-template`, CloudWatch/Logs, Bedrock listing, name conflicts, budgets read, IAM simulation). |
-| Name conflicts (shared account, `us-east-1`) | **None.** Stack `intentlock-control-plane-dev` does not exist; table `intentlock-control-plane`, function `intentlock-authorizer`, log group `/aws/lambda/intentlock-authorizer` are free. No budgets exist yet. Zip bucket not yet chosen/created. |
-| Deploy permissions | **Present.** IAM simulation shows `allowed` for all deploy actions. Source: `aparpia` has the **AdministratorAccess** managed policy (read-only IAM listing), i.e. broader than the scoped policies in `infrastructure/control-plane/iam/` (which were not used). Recommend swapping to the scoped policies after the first deploy. |
-| Bedrock model | Not chosen. Availability API (metadata only, nothing invoked): `anthropic.claude-haiku-5-5` and `anthropic.claude-sonnet-5-5` are `AUTHORIZED`/`AVAILABLE` in `us-east-1`; Sonnet 5.5 requires an inference-profile id (`us.anthropic.claude-sonnet-5-5`). Likely choice for cheap drafting: `us.anthropic.claude-haiku-5-5`. Actual invocation unverified (billable; needs approval). |
-| Nothing deployed | No AWS resource has been created, changed or deleted. Earlier read-only checks used the unrelated `default` profile and do not describe the shared account. |
-| Template | `cfn-lint` clean; resources now tagged `Project=IntentLock`, `Owner=person1-control-plane`. Not deployed. |
-| Tests vs AWS | All tests use fake credentials / moto; no test can reach real AWS (see §11). |
-Readiness, costs, $25 budget recommendation, least-privilege and public-endpoint reviews: `infrastructure/control-plane/README.md`.
+| Real DynamoDB tests | **87/87 pass** on the real table (isolated unique ids; table emptied afterwards). |
+| Real Lambda test | **Pass**: allow, `.env` → `PROTECTED_PATH` + run `blocked` in DynamoDB, replay denied, 8 fail-closed cases, gap-free events, CloudWatch audit lines. Store-outage fail-closed NOT tested on real AWS (mocked only). |
+| Latency (laptop→us-east-1, warm, N=30) | Lambda duration p50 146 / p95 154 ms; client wall p50 237 / p95 242 ms; API-on-laptop→DynamoDB p50 649 / p95 870 / max 1,078 ms; **cold start 5.0 s**. |
+| Budget | **Not created** (needs Kavin's agreement on the alert recipient). Account has 0 budgets. |
+| Bedrock | Nothing invoked. Recommend `us.anthropic.claude-haiku-5-5` (profile id required; cross-region us-east-1/us-east-2/us-west-2); price/latency/JSON quality unverified. |
+| Person 2 | Their client cannot call the deployed Lambda (HTTP+token only; no Function URL). They keep using the HTTP API (can run on this table). |
+| Open | Swap AdministratorAccess for scoped policies; Lambda memory/cold start; tidy log ARN in template; budget; Bedrock model decision. |
 
 ## 11. Tests and Verification
 - `python3 -m pytest -q` → **116 passed** (contract 29, policy 66, API 21). Executed 2026-11-07. Added: expiry-before-denial (incl. invalid-args request on expired run), plain-GET expiry, `Last-Event-ID` resume, `request_permission`/`finish_task` conditionality (run state, contract state/version, limits, arguments).
@@ -306,6 +302,7 @@ Milestone 6 results (2026-11-07):
 **Person 2:** confirm the TwinGuard contract (§9: `/internal/impact`, artifact location, `/promote`, `TRUSTED_TEST_MODIFIED`); fix/confirm the open runner items; promoter must recheck run state before applying (an in-flight promotion cannot be cancelled by the control plane); replace `apps/mcp-server/schemas` copies with canonical loading.
 
 ## 14. Next Steps
-1. **Owner approval needed to deploy** the sequence in `infrastructure/control-plane/README.md` (bucket `intentlock-code-247495661854-us-east-1` → zip → stack `intentlock-control-plane-dev` → real-table tests + one synthetic Lambda invoke). Also decide: Bedrock model/profile id (e.g. `us.anthropic.claude-haiku-5-5`), $25 budget alert. Nothing is deployed yet.
-2. After the first deploy: measure real DynamoDB latency of `/internal/authorize`; Kavin to replace AdministratorAccess with the scoped policies.
-3. **Person 2 / Kavin:** TwinGuard/promoter per §9; real-Kiro run; set `INTENTLOCK_REVIEWER_TOKENS`.
+1. **Owner/Kavin:** name the budget alert recipient so one $25 budget can be created (alert only, not a cap); choose the Bedrock model (recommend `us.anthropic.claude-haiku-5-5`) and approve a first (billable) invocation test.
+2. **Person 1:** run the API with `INTENTLOCK_STORE=dynamodb INTENTLOCK_TABLE=intentlock-control-plane AWS_PROFILE=intentlock` for the demo and re-measure latency from the demo machine; consider Lambda memory 512–1024 MB and the log-ARN tidy-up in a stack update (needs approval).
+3. **Kavin:** replace AdministratorAccess on `aparpia` with the scoped policies when convenient.
+4. **Person 2 / Kavin:** TwinGuard/promoter per §9; real-Kiro run; set `INTENTLOCK_REVIEWER_TOKENS`.

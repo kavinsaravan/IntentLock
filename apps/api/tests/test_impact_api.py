@@ -8,6 +8,7 @@ import hashlib
 import json
 import pathlib
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import jsonschema
@@ -40,6 +41,7 @@ class Env:
     """One control plane with a run, an artifact dir and (optionally) a fake promoter."""
     def __init__(self, store, tmp_path, *, promoter="fake", reviewers=None):
         self.store, self.tmp = store, tmp_path
+        self.iid = "impact_" + uuid.uuid4().hex[:10]     # unique per test: persistent (real) tables must not collide
         self.promoter = FakePromoter() if promoter == "fake" else promoter
         self.reader = LocalDirArtifactReader(str(tmp_path / "artifacts"))
         self.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=self.reader,
@@ -48,7 +50,8 @@ class Env:
         self.contract = activate(self.client)
         self.run = start_run(self.client, self.contract)
 
-    def report(self, decision="pass", iid="impact_01", write_patch=True, patch=PATCH, **over):
+    def report(self, decision="pass", iid=None, write_patch=True, patch=PATCH, **over):
+        iid = iid or self.iid
         sha = hashlib.sha256(patch.encode()).hexdigest()
         d = json.loads((FIX / "impact-report.json").read_text())
         key = f"runs/{self.run['run_id']}/patches/{sha}.patch"
@@ -94,7 +97,7 @@ def test_ingest_requires_token_and_validates_schema(env):
     assert env.ingest({**r, "run_id": "run_nope"}).status_code == 404
     assert env.ingest({**r, "contract_version": 2}).status_code == 409
     assert env.ingest({**r, "base_commit": "f" * 40}).json()["detail"] == "STALE_BASE_COMMIT"
-    assert env.client.get("/api/impact/impact_01").status_code == 404
+    assert env.client.get(f"/api/impact/{env.iid}").status_code == 404
 
 
 def test_ingest_is_immutable_idempotent_and_never_promotes(env):
@@ -103,16 +106,16 @@ def test_ingest_is_immutable_idempotent_and_never_promotes(env):
     assert env.ingest(r).status_code == 200 and env.ingest(r).json()["stored"] is False       # idempotent
     changed = {**r, "decision": "block"}
     assert env.ingest(changed).json()["detail"] == "IMPACT_EXISTS"                           # cannot be rewritten
-    assert env.client.get("/api/impact/impact_01").json()["decision"] == "pass"
+    assert env.client.get(f"/api/impact/{env.iid}").json()["decision"] == "pass"
     ev = [e for e in env.client.get(f"/api/runs/{env.run['run_id']}/events").json()["events"] if e["event_type"] == "impact_report"]
-    assert len(ev) == 1 and ev[0]["details"]["impact_report_id"] == "impact_01" and ev[0]["details"]["decision"] == "pass"
+    assert len(ev) == 1 and ev[0]["details"]["impact_report_id"] == env.iid and ev[0]["details"]["decision"] == "pass"
     assert env.promoter.calls == []                         # a passing report never triggers promotion
 
 
 # -------------------------------------------------------------------- reads
 def test_patch_endpoint_serves_exact_verified_bytes(env):
     r = env.report(); env.ingest(r)
-    resp = env.client.get("/api/impact/impact_01/patch")
+    resp = env.client.get(f"/api/impact/{env.iid}/patch")
     assert resp.status_code == 200 and resp.text == PATCH and resp.headers["x-patch-sha256"] == SHA
     assert hashlib.sha256(resp.content).hexdigest() == r["patch_sha256"]
 
@@ -121,17 +124,17 @@ def test_tampered_or_missing_patch_is_never_served(env):
     r = env.report(); env.ingest(r)
     path = env.tmp / "artifacts" / r["patch_s3_key"]
     path.write_text(PATCH + "+extra\n")
-    resp = env.client.get("/api/impact/impact_01/patch")
+    resp = env.client.get(f"/api/impact/{env.iid}/patch")
     assert resp.status_code == 409 and resp.json()["detail"] == "PATCH_HASH_MISMATCH" and "extra" not in resp.text
     path.unlink()
-    assert env.client.get("/api/impact/impact_01/patch").status_code == 404
+    assert env.client.get(f"/api/impact/{env.iid}/patch").status_code == 404
 
 
 def test_artifact_key_traversal_is_not_readable(env):
     secret = env.tmp / "secret.txt"; secret.write_text("TOPSECRET")
     r = env.report(write_patch=False, patch_s3_key="../secret.txt", patch_sha256=hashlib.sha256(b"TOPSECRET").hexdigest())
     assert env.ingest(r).status_code == 201
-    resp = env.client.get("/api/impact/impact_01/patch")
+    resp = env.client.get(f"/api/impact/{env.iid}/patch")
     assert resp.status_code == 404 and "TOPSECRET" not in resp.text
 
 
@@ -143,7 +146,7 @@ def test_blocked_patch_is_never_approvable(env):
     st = env.status(r)
     assert st["can_approve"] is False and "IMPACT_BLOCKED" in st["approve_blockers"] and st["review"] is None
     assert env.promote(r).status_code == 409 and env.promoter.calls == []
-    assert env.store.get_final_review("impact_01") is None
+    assert env.store.get_final_review(env.iid) is None
 
 
 def test_approve_binds_reviewer_contract_base_commit_and_digest(env):
@@ -163,16 +166,16 @@ def test_approve_rejects_wrong_digest_or_base_commit(env):
     r = env.report(); env.ingest(r)
     assert env.approve(r, patch_sha256="0" * 64).json()["detail"] == "PATCH_HASH_MISMATCH"
     assert env.approve(r, base_commit="e" * 40).json()["detail"] == "STALE_BASE_COMMIT"
-    assert env.client.post("/api/impact/impact_01/approve", json={"reviewer": ALI}).status_code == 422
-    assert env.store.get_final_review("impact_01") is None
+    assert env.client.post(f"/api/impact/{env.iid}/approve", json={"reviewer": ALI}).status_code == 422
+    assert env.store.get_final_review(env.iid) is None
 
 
 def test_review_authorization_is_enforced_by_backend(store, tmp_path):
     e = Env(store, tmp_path, reviewers={ALI})
     r = e.report(); e.ingest(r)
     assert e.approve(r, BOB).status_code == 403 and e.approve(r, BOB).json()["detail"] == "REVIEWER_NOT_AUTHORIZED"
-    assert e.client.post("/api/impact/impact_01/reject", json=e.body(r, BOB), headers={"X-IntentLock-Reviewer-Token": "bob-test-token"}).status_code == 403
-    assert e.store.get_final_review("impact_01") is None
+    assert e.client.post(f"/api/impact/{e.iid}/reject", json=e.body(r, BOB), headers={"X-IntentLock-Reviewer-Token": "bob-test-token"}).status_code == 403
+    assert e.store.get_final_review(e.iid) is None
     assert e.approve(r, ALI).status_code == 200
     assert e.status(r)["reviewer_policy"] == "authenticated allowlist"
 
@@ -183,13 +186,13 @@ def test_one_decision_per_report(env):
     again = env.approve(r)
     assert again.status_code == 200 and again.json()["created"] is False                   # idempotent for the same reviewer
     assert env.approve(r, BOB).json()["detail"] == "ALREADY_REVIEWED"                       # a different reviewer cannot re-decide
-    rej = env.client.post("/api/impact/impact_01/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
+    rej = env.client.post(f"/api/impact/{env.iid}/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
     assert rej.status_code == 409 and rej.json()["detail"] == "ALREADY_REVIEWED"          # approve cannot be flipped to reject
 
 
 def test_reject_allowed_even_for_blocked_and_makes_promotion_impossible(env):
     r = env.report("block"); env.ingest(r)
-    resp = env.client.post("/api/impact/impact_01/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
+    resp = env.client.post(f"/api/impact/{env.iid}/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
     assert resp.status_code == 200 and resp.json()["review"]["decision"] == "reject"
     assert env.promote(r).json()["detail"] == "NOT_APPROVED" and env.promoter.calls == []
 
@@ -218,7 +221,7 @@ def test_approval_blocked_for_security_blocked_run(env):
 def test_promotion_requires_an_approval(env):
     r = env.report(); env.ingest(r)
     assert env.promote(r).json()["detail"] == "NOT_APPROVED"
-    assert env.promoter.calls == [] and env.store.get_promotion("impact_01") is None
+    assert env.promoter.calls == [] and env.store.get_promotion(env.iid) is None
 
 
 def test_pass_report_never_promotes_until_explicitly_requested(env):
@@ -236,7 +239,7 @@ def test_promoter_receives_exact_bound_request_and_outcome_is_recorded(env):
     call = env.promoter.calls[0]
     assert (call.base_commit, call.patch_sha256, call.patch_s3_key) == (r["base_commit"], r["patch_sha256"], r["patch_s3_key"])
     assert (call.run_id, call.contract_id, call.contract_version) == (env.run["run_id"], env.contract["contract_id"], 1)
-    assert call.review.review_id == "rev_impact_01" and call.review.reviewer == ALI
+    assert call.review.review_id == f"rev_{env.iid}" and call.review.reviewer == ALI
     assert p["status"] == "promoted" and p["applied_patch_sha256"] == r["patch_sha256"] and p["completed_at"] and p["requested_by"] == ALI
     assert env.status(r)["promotion"]["status"] == "promoted"
     ev = [e for e in env.client.get(f"/api/runs/{env.run['run_id']}/events").json()["events"] if e["event_type"] == "promotion"]
@@ -254,7 +257,7 @@ def test_promotion_refused_when_patch_tampered_after_approval(env):
     r = env.report(); env.ingest(r); env.approve(r)
     (env.tmp / "artifacts" / r["patch_s3_key"]).write_text(PATCH + "+evil\n")
     assert env.promote(r).json()["detail"] == "PATCH_HASH_MISMATCH"
-    assert env.promoter.calls == [] and env.store.get_promotion("impact_01") is None
+    assert env.promoter.calls == [] and env.store.get_promotion(env.iid) is None
 
 
 def test_promotion_refused_when_contract_superseded_after_approval(env):
@@ -288,7 +291,7 @@ def test_no_promoter_configured_returns_503_and_creates_no_record(store, tmp_pat
     e = Env(store, tmp_path, promoter=None)
     r = e.report(); e.ingest(r); e.approve(r)
     assert e.promote(r).status_code == 503 and e.promote(r).json()["detail"] == "PROMOTER_NOT_CONFIGURED"
-    assert e.store.get_promotion("impact_01") is None and e.status(r)["promoter_configured"] is False
+    assert e.store.get_promotion(e.iid) is None and e.status(r)["promoter_configured"] is False
 
 
 def test_status_reports_can_flags_and_blockers(env):
@@ -306,7 +309,7 @@ def test_stored_items_never_contain_patch_text(env, store):
     assert "timeout = 30" not in dump and "const timeout" not in dump
     if hasattr(store, "_t"):
         items = []
-        for pk in (f"RUN#{env.run['run_id']}", "IMPACT#impact_01", "REVIEW#impact_01", "PROMO#impact_01"):
+        for pk in (f"RUN#{env.run['run_id']}", f"IMPACT#{env.iid}", f"REVIEW#{env.iid}", f"PROMO#{env.iid}"):
             items += store._t.query(KeyConditionExpression="pk = :p", ExpressionAttributeValues={":p": pk}, ConsistentRead=True)["Items"]
         assert "const timeout" not in json.dumps(items, default=str)
 
@@ -403,6 +406,6 @@ def test_stop_after_approval_cancels_promotion(env):
 def test_unconfigured_reviewer_tokens_fail_closed(store, tmp_path):
     e = Env(store, tmp_path)
     e.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=e.reader, promoter=e.promoter, reviewer_tokens={}))
-    r = e.report(iid="impact_auth_unconfigured"); e.ingest(r)
+    r = e.report(); e.ingest(r)
     assert 'REVIEW_AUTH_NOT_CONFIGURED' in e.status(r)['approve_blockers']
     assert e.approve(r).status_code == 401

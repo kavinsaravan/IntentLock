@@ -33,7 +33,7 @@ def test_every_review_endpoint_rejects_missing_or_wrong_tokens(env, action, toke
     r = env.report(); env.ingest(r)
     resp = post(env, r, action, ALI, token)
     assert resp.status_code == 401 and resp.json()["detail"] == "REVIEWER_NOT_AUTHENTICATED"   # never a 500, never success
-    assert env.store.get_final_review("impact_01") is None and env.promoter.calls == []
+    assert env.store.get_final_review(env.iid) is None and env.promoter.calls == []
 
 
 def test_token_is_bound_to_the_named_reviewer(env):
@@ -46,9 +46,9 @@ def test_token_is_bound_to_the_named_reviewer(env):
 def test_authentication_precedes_every_other_check(env):
     """A wrong token must not reveal digest/base-commit/blocked state (401 before 409)."""
     r = env.report("block"); env.ingest(r)
-    bad = env.client.post("/api/impact/impact_01/approve", json={"reviewer": ALI, "patch_sha256": "0" * 64, "base_commit": "f" * 40}, headers={HDR: "nope"})
+    bad = env.client.post(f"/api/impact/{env.iid}/approve", json={"reviewer": ALI, "patch_sha256": "0" * 64, "base_commit": "f" * 40}, headers={HDR: "nope"})
     assert bad.status_code == 401
-    good = env.client.post("/api/impact/impact_01/approve", json={"reviewer": ALI, "patch_sha256": "0" * 64, "base_commit": "f" * 40}, headers={HDR: "ali-test-token"})
+    good = env.client.post(f"/api/impact/{env.iid}/approve", json={"reviewer": ALI, "patch_sha256": "0" * 64, "base_commit": "f" * 40}, headers={HDR: "ali-test-token"})
     assert good.status_code == 409
 
 
@@ -56,7 +56,7 @@ def test_unconfigured_tokens_fail_closed_for_all_actions(tmp_path):
     store = LocalMemoryStore()
     e = Env(store, tmp_path)
     e.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=e.reader, promoter=e.promoter, reviewer_tokens={}))
-    r = e.report(iid="impact_unconf"); e.ingest(r)
+    r = e.report(); e.ingest(r)
     for action in ("approve", "reject", "promote"):
         assert post(e, r, action, ALI, "anything-at-all-123456").status_code == 401
     st = e.status(r)
@@ -68,7 +68,7 @@ def test_env_default_without_tokens_is_fail_closed(tmp_path, monkeypatch):
     store = LocalMemoryStore()
     e = Env(store, tmp_path)
     e.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=e.reader, promoter=e.promoter))   # reviewer_tokens="env"
-    r = e.report(iid="impact_env"); e.ingest(r)
+    r = e.report(); e.ingest(r)
     assert post(e, r, "approve", ALI, "ali-test-token").status_code == 401
 
 
@@ -95,7 +95,7 @@ def test_malformed_env_stops_the_app_from_starting(monkeypatch):
 def test_tokens_never_appear_in_responses_status_events_or_logs(env, caplog):
     r = env.report(); env.ingest(r)
     with caplog.at_level(logging.DEBUG):
-        outs = [post(env, r, "approve", ALI, "wrong-secret-value-xyz"), post(env, r, "approve"), env.client.get("/api/impact/impact_01/status"),
+        outs = [post(env, r, "approve", ALI, "wrong-secret-value-xyz"), post(env, r, "approve"), env.client.get(f"/api/impact/{env.iid}/status"),
                 env.client.get(f"/api/runs/{env.run['run_id']}/events")]
         post(env, r, "promote")
     dump = " ".join(o.text for o in outs) + caplog.text
@@ -131,7 +131,7 @@ def test_completed_run_can_still_be_reviewed(env):
 
 def test_exact_patch_verification_still_applies_with_valid_token(env):
     r = env.report(); env.ingest(r)
-    assert env.client.post("/api/impact/impact_01/approve", json={**env.body(r), "patch_sha256": "1" * 64}, headers={HDR: "ali-test-token"}).json()["detail"] == "PATCH_HASH_MISMATCH"
+    assert env.client.post(f"/api/impact/{env.iid}/approve", json={**env.body(r), "patch_sha256": "1" * 64}, headers={HDR: "ali-test-token"}).json()["detail"] == "PATCH_HASH_MISMATCH"
     (env.tmp / "artifacts" / r["patch_s3_key"]).write_text("tampered")
     assert post(env, r, "approve").json()["detail"] == "PATCH_HASH_MISMATCH"
-    assert env.store.get_final_review("impact_01") is None
+    assert env.store.get_final_review(env.iid) is None

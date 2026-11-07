@@ -4,8 +4,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/infrastructure/control-plane/build"
+# Prefer the project virtualenv so nothing touches a shared/global Python environment.
+PY="${PYTHON:-$([ -x "$ROOT/.venv/bin/python" ] && echo "$ROOT/.venv/bin/python" || echo python3)}"
 rm -rf "$OUT" && mkdir -p "$OUT/pkg/intentlock_api"
-python3 -m pip install --quiet --target "$OUT/pkg" --platform manylinux2014_x86_64 \
+"$PY" -m pip install --quiet --target "$OUT/pkg" --platform manylinux2014_x86_64 \
   --python-version 3.12 --implementation cp --only-binary=:all: --upgrade "pydantic>=2.9,<3"
 cp -R "$ROOT/packages/policy-engine/intentlock_policy" "$OUT/pkg/intentlock_policy"
 for f in __init__ store dynamo_store service lambda_handler; do cp "$ROOT/apps/api/intentlock_api/$f.py" "$OUT/pkg/intentlock_api/"; done
