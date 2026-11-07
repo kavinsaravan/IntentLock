@@ -218,7 +218,7 @@ Method: both handoffs read from git, claims checked against Person 2's source (`
 | Patch approval/promotion rules | **Control plane enforces; promoter must re-verify.** Exact digest, base commit, blocked-never-approvable, authenticated reviewers, stopped/blocked runs ineligible. In-flight promotion needs a promoter-side run-state recheck. | tests |
 | Trusted tests | **Authorization layer done; TwinGuard half missing.** Shared vectors exist. | tests/vectors |
 | AWS ownership | **No conflict.** Person 2 has created no AWS resources and has no stack yet; proposed split in `infrastructure/control-plane/README.md` awaits their agreement. | handoffs |
-Outdated assumptions found: Person 2's older handoff text said no completion endpoint / launch not wired (they have since updated it); their "For Ali" item to delete the temporary safeguards branch after merging is NOT done (remote-branch deletion needs the owner's approval).
+Outdated assumptions found: Person 2's older handoff text said no completion endpoint / launch not wired (they have since updated it); the owner decided to KEEP the remote branch `codex/ali-review-safeguards` (already merged into `Ali-Person-1`; no further review/merge needed; do not delete).
 Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `PermissionError` in `lifecycle.terminate_group` (still present in their source: no `PermissionError` handling); (b) no SIGTERM handler in their runner (my backstop uses SIGINT first); (c) `launch_kiro.py` passes the prompt as the final positional Kiro argument without `--`, so a mission starting with `-` might be parsed as an option (unverified) — suggest adding `--` or rejecting such missions; (d) their control-plane client uses a 2 s HTTP timeout and treats timeouts as `POLICY_ENGINE_ERROR`/lost control plane (which terminates the agent): `/internal/authorize` makes about 9 sequential DynamoDB calls, so latency from a laptop to real DynamoDB in `us-east-1` is UNMEASURED and could approach that limit — measure before the DynamoDB-backed demo, or run the API with the memory store / in-region; (e) tool exposure of Kiro (built-in tools) still unverified.
 
 ## 10. AWS Configuration
@@ -226,7 +226,7 @@ Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `Permission
 | Item | State (2026-11-07) |
 |---|---|
 | AWS CLI | Installed (`aws-cli/2.36.40`). |
-| Profile `intentlock` | **Still does NOT exist** on this machine (re-checked after Kavin's clarification). Owner must run `aws configure --profile intentlock` privately (replacement key; region `us-east-1`; output `json`). |
+| Profile `intentlock` | **Still does NOT exist** on this machine (re-checked again; waiting for the owner's private `aws configure --profile intentlock`). Owner must run `aws configure --profile intentlock` privately (replacement key; region `us-east-1`; output `json`). |
 | Identity / account / username match, service access, Bedrock model | **Not verified** until the profile exists. `infrastructure/control-plane/verify_aws_readonly.sh` is ready (read-only; checks identity, DynamoDB, Lambda, S3, CloudFormation incl. `validate-template`, CloudWatch/Logs, Bedrock listing, name conflicts, budgets, IAM simulation; never invokes a model). |
 | Nothing deployed | No AWS resource has been created, changed or deleted. Earlier read-only checks used the unrelated `default` profile and do not describe the shared account. |
 | Template | `cfn-lint` clean; resources now tagged `Project=IntentLock`, `Owner=person1-control-plane`. Not deployed. |
