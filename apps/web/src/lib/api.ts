@@ -80,8 +80,8 @@ export const api = {
     return res.text();
   },
   review: (id: string, action: "approve" | "reject",
-           b: { reviewer: string; patch_sha256: string; base_commit: string }) =>
-    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, post(b)),
-  promote: (id: string, b: { requested_by: string; patch_sha256: string }) =>
-    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, post(b)),
+           b: { reviewer: string; patch_sha256: string; base_commit: string }, token: string) =>
+    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, { ...post(b), headers: { "Content-Type": "application/json", "X-IntentLock-Reviewer-Token": token } }),
+  promote: (id: string, b: { requested_by: string; patch_sha256: string }, token: string) =>
+    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, { ...post(b), headers: { "Content-Type": "application/json", "X-IntentLock-Reviewer-Token": token } }),
 };

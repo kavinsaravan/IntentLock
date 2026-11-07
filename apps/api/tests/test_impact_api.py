@@ -43,7 +43,8 @@ class Env:
         self.promoter = FakePromoter() if promoter == "fake" else promoter
         self.reader = LocalDirArtifactReader(str(tmp_path / "artifacts"))
         self.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=self.reader,
-                                            promoter=self.promoter, reviewers=reviewers))
+                                            promoter=self.promoter, reviewers=reviewers,
+                                            reviewer_tokens={ALI: "ali-test-token", BOB: "bob-test-token"}))
         self.contract = activate(self.client)
         self.run = start_run(self.client, self.contract)
 
@@ -67,11 +68,13 @@ class Env:
         return {"reviewer": who, "patch_sha256": report["patch_sha256"], "base_commit": report["base_commit"], **over}
 
     def approve(self, report, who=ALI, **over):
-        return self.client.post(f"/api/impact/{report['impact_report_id']}/approve", json=self.body(report, who, **over))
+        return self.client.post(f"/api/impact/{report['impact_report_id']}/approve", json=self.body(report, who, **over),
+                                headers={"X-IntentLock-Reviewer-Token": "ali-test-token" if who == ALI else "bob-test-token"})
 
     def promote(self, report, who=ALI, sha=None):
         return self.client.post(f"/api/impact/{report['impact_report_id']}/promote",
-                                json={"requested_by": who, "patch_sha256": sha or report["patch_sha256"]})
+                                json={"requested_by": who, "patch_sha256": sha or report["patch_sha256"]},
+                                headers={"X-IntentLock-Reviewer-Token": "ali-test-token" if who == ALI else "bob-test-token"})
 
     def status(self, report):
         return self.client.get(f"/api/impact/{report['impact_report_id']}/status").json()
@@ -168,10 +171,10 @@ def test_review_authorization_is_enforced_by_backend(store, tmp_path):
     e = Env(store, tmp_path, reviewers={ALI})
     r = e.report(); e.ingest(r)
     assert e.approve(r, BOB).status_code == 403 and e.approve(r, BOB).json()["detail"] == "REVIEWER_NOT_AUTHORIZED"
-    assert e.client.post("/api/impact/impact_01/reject", json=e.body(r, BOB)).status_code == 403
+    assert e.client.post("/api/impact/impact_01/reject", json=e.body(r, BOB), headers={"X-IntentLock-Reviewer-Token": "bob-test-token"}).status_code == 403
     assert e.store.get_final_review("impact_01") is None
     assert e.approve(r, ALI).status_code == 200
-    assert e.status(r)["reviewer_policy"] == "allowlist"
+    assert e.status(r)["reviewer_policy"] == "authenticated allowlist"
 
 
 def test_one_decision_per_report(env):
@@ -180,13 +183,13 @@ def test_one_decision_per_report(env):
     again = env.approve(r)
     assert again.status_code == 200 and again.json()["created"] is False                   # idempotent for the same reviewer
     assert env.approve(r, BOB).json()["detail"] == "ALREADY_REVIEWED"                       # a different reviewer cannot re-decide
-    rej = env.client.post("/api/impact/impact_01/reject", json=env.body(r))
+    rej = env.client.post("/api/impact/impact_01/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
     assert rej.status_code == 409 and rej.json()["detail"] == "ALREADY_REVIEWED"          # approve cannot be flipped to reject
 
 
 def test_reject_allowed_even_for_blocked_and_makes_promotion_impossible(env):
     r = env.report("block"); env.ingest(r)
-    resp = env.client.post("/api/impact/impact_01/reject", json=env.body(r))
+    resp = env.client.post("/api/impact/impact_01/reject", json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "ali-test-token"})
     assert resp.status_code == 200 and resp.json()["review"]["decision"] == "reject"
     assert env.promote(r).json()["detail"] == "NOT_APPROVED" and env.promoter.calls == []
 
@@ -362,3 +365,44 @@ def test_end_to_end_with_real_http_promoter(store, tmp_path, promoter_server):
     r = e.report(); e.ingest(r); e.approve(r)
     assert e.promote(r).json()["promotion"]["status"] == "promoted"
     assert len(_Handler.seen) == 1
+
+
+def test_review_requires_token_bound_to_reviewer(env):
+    r = env.report(); env.ingest(r)
+    path = f"/api/impact/{r['impact_report_id']}/approve"
+    assert env.client.post(path, json=env.body(r)).status_code == 401
+    assert env.client.post(path, json=env.body(r), headers={"X-IntentLock-Reviewer-Token": "bob-test-token"}).status_code == 401
+    assert env.store.get_final_review(r['impact_report_id']) is None
+    assert env.approve(r).status_code == 200
+    promote = f"/api/impact/{r['impact_report_id']}/promote"
+    body = {"requested_by": ALI, "patch_sha256": r['patch_sha256']}
+    assert env.client.post(promote, json=body).status_code == 401
+    assert env.client.post(promote, json=body, headers={"X-IntentLock-Reviewer-Token": "bob-test-token"}).status_code == 401
+    assert env.promoter.calls == []
+
+
+def test_stop_cancels_approval_and_promotion(env):
+    r = env.report(); env.ingest(r)
+    env.client.post(f"/api/runs/{env.run['run_id']}/stop", json={})
+    assert env.status(r)['can_approve'] is False
+    assert 'RUN_NOT_ELIGIBLE' in env.status(r)['approve_blockers']
+    assert env.approve(r).json()['detail'] == 'RUN_NOT_ELIGIBLE'
+    assert env.promoter.calls == []
+
+
+def test_stop_after_approval_cancels_promotion(env):
+    r = env.report(); env.ingest(r)
+    assert env.approve(r).status_code == 200
+    env.client.post(f"/api/runs/{env.run['run_id']}/stop", json={})
+    assert env.status(r)['can_promote'] is False
+    assert 'RUN_NOT_ELIGIBLE' in env.status(r)['promote_blockers']
+    assert env.promote(r).json()['detail'] == 'RUN_NOT_ELIGIBLE'
+    assert env.promoter.calls == []
+
+
+def test_unconfigured_reviewer_tokens_fail_closed(store, tmp_path):
+    e = Env(store, tmp_path)
+    e.client = TestClient(create_app(store, internal_token=TOKEN, artifacts=e.reader, promoter=e.promoter, reviewer_tokens={}))
+    r = e.report(iid="impact_auth_unconfigured"); e.ingest(r)
+    assert 'REVIEW_AUTH_NOT_CONFIGURED' in e.status(r)['approve_blockers']
+    assert e.approve(r).status_code == 401

@@ -92,3 +92,15 @@ Account `247495661854` (owned by Kavin), region `us-east-1`, a single environmen
 | Person 2 (proposed) | `intentlock-execution-plane-dev` | S3 artifact/evidence bucket `intentlock-artifacts-247495661854-us-east-1` (account+region suffix keeps the global name unique); promoter/sandbox resources prefixed `intentlock-exec-`; tags `Owner=person2-execution-plane`. |
 | Shared (once) | n/a | Lambda-zip bucket for the control plane `intentlock-code-247495661854-us-east-1` (Person 1 creates it only after approval); ONE AWS Budget `intentlock-hackathon` (owner/Kavin creates it). |
 Rules: never create unprefixed resources; never edit the other person's stack; check names with `verify_aws_readonly.sh` first (it checks the Person 1 names); the Lambda concurrency quota and every cost are shared across both stacks (re-check the quota in THIS account once the profile works).
+
+### Human review authentication
+
+Set `INTENTLOCK_REVIEWER_TOKENS` to a JSON object mapping reviewer names to
+random, private tokens. Approval, rejection and promotion requests must send
+`X-IntentLock-Reviewer-Token` for the reviewer named in the body. Missing or wrong
+tokens return 401; an unset mapping fails closed. Enter the token into the Impact
+Review screen at review time. Do not store it in a `VITE_*` variable, commit it,
+or expose these endpoints over plaintext HTTP outside localhost. The existing
+`INTENTLOCK_REVIEWERS` list can further restrict which authenticated reviewers
+may act. A stopped run blocks approval and promotion; an already started promoter
+must separately verify current run state before applying a patch.
