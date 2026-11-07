@@ -8,7 +8,7 @@
 ## 2. Last Updated
 - UTC: 2026-11-07
 - Branch: `Ali-Person-1` (the PRD calls it `person1-control-plane`; actual name is `Ali-Person-1`)
-- Commit: see `git log -1 -- docs/handoffs/person1-control-plane.md` (hash recorded at bottom after commit)
+- Commit: `a66614d` (milestone 1: schemas, policy engine, API; later commits may follow)
 - Schema version: `0.1.0` (PROPOSED — not yet agreed with Person 2)
 
 ## 3. Current Status
@@ -88,7 +88,7 @@ Types: MissionContract, MissionContractDraft, ToolRequest, AuthorizationDecision
   - `list_files("src")` for a dir not matching an allowed glob is denied; you must also filter listings.
   - Never send file contents/patches in `/internal/events` details.
 - Validate against `packages/contracts/schemas/*.json` (e.g. ajv).
-- Blockers: none known; waiting on Person 2's branch/handoff (not present on `origin` as of this update).
+- Note: `intentlock-prd.md` is NOT committed to the repo (shared root file; whoever adds it should tell the other). Blockers: none known; waiting on Person 2's branch/handoff (not present on `origin` as of this update).
 
 ## 10. AWS Configuration
 | Service | State |
@@ -101,7 +101,7 @@ Types: MissionContract, MissionContractDraft, ToolRequest, AuthorizationDecision
 No credentials are stored in the repo.
 
 ## 11. Tests and Verification
-- `python3 -m pytest -q` → **111 passed** (contract 36-ish, policy ~50, API 17). Executed 2026-11-07.
+- `python3 -m pytest -q` → **111 passed** (contract 29, policy 65, API 17). Executed 2026-11-07.
 - Covered: all PRD §11-A acceptance items except "dashboard displays real events" (no dashboard yet) and CloudWatch logging checks; includes traversal/encoded/absolute paths, hidden patch headers, protected precedence, version mismatch, inactive/stopped, call/time limits, fail-closed on internal error, no secret/patch leakage in decisions/events/audit log, SSE.
 - Manual: live `uvicorn` + `curl`: allow → `.env` deny (run → blocked) → `RUN_NOT_ACTIVE`. Latency ≈0.01–0.35 ms in-process (not an end-to-end/AWS figure).
 - Missing: DynamoDB/Lambda/Bedrock integration tests, concurrency across processes (current counting uses a single-process lock), cross-workstream integration.
