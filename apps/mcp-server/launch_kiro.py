@@ -11,6 +11,14 @@ from lifecycle import supervise
 
 
 def profile(repository, run_id, contract_id, version):
+    mcp_env = {'INTENTLOCK_API_URL': '${INTENTLOCK_API_URL}',
+               'INTENTLOCK_INTERNAL_TOKEN': '${INTENTLOCK_INTERNAL_TOKEN}'}
+    if os.environ.get('INTENTLOCK_ARTIFACT_BUCKET'):
+        mcp_env['INTENTLOCK_ARTIFACT_BUCKET'] = '${INTENTLOCK_ARTIFACT_BUCKET}'
+        if os.environ.get('INTENTLOCK_AWS_PROFILE'):
+            mcp_env['INTENTLOCK_AWS_PROFILE'] = '${INTENTLOCK_AWS_PROFILE}'
+    elif os.environ.get('INTENTLOCK_ARTIFACT_DIR'):
+        mcp_env['INTENTLOCK_ARTIFACT_DIR'] = '${INTENTLOCK_ARTIFACT_DIR}'
     return {
         'name': 'intentlock',
         'description': 'Coding-agent execution through IntentLock',
@@ -26,9 +34,7 @@ def profile(repository, run_id, contract_id, version):
             'command': sys.executable,
             'args': ['-B', str(Path(__file__).with_name('server.py').resolve()), '--repository', str(Path(repository).resolve()),
                      '--run-id', run_id, '--contract-id', contract_id, '--contract-version', str(version)],
-            'env': {'INTENTLOCK_API_URL': '${INTENTLOCK_API_URL}', 'INTENTLOCK_INTERNAL_TOKEN': '${INTENTLOCK_INTERNAL_TOKEN}',
-                    'INTENTLOCK_ARTIFACT_DIR': '${INTENTLOCK_ARTIFACT_DIR}', 'INTENTLOCK_ARTIFACT_BUCKET': '${INTENTLOCK_ARTIFACT_BUCKET}',
-                    'INTENTLOCK_AWS_PROFILE': '${INTENTLOCK_AWS_PROFILE}'}}}}
+            'env': mcp_env}}}
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()

@@ -1,6 +1,8 @@
 """Actual HTTP control plane, Docker TwinGuard and HTTP promoter, using local artifacts."""
 import json
 import os
+import re
+import shutil
 from pathlib import Path
 import shutil
 import socket
@@ -133,3 +135,54 @@ class TwinGuardApi(unittest.TestCase):
         audit_key,audit_digest=export_audit(self.client,self.artifact_store,run['run_id'])
         self.assertEqual(audit_key,f"runs/{run['run_id']}/audit/final.json")
         self.assertEqual(len(audit_digest),64)
+
+    @unittest.skipUnless(os.environ.get('INTENTLOCK_REAL_KIRO') == '1', 'Explicit real Kiro opt-in')
+    def test_real_kiro_proposes_reviewed_patch(self):
+        if not shutil.which('kiro-cli'):
+            self.skipTest('kiro-cli is not installed')
+        contract,run=self.run_contract()
+        safe_patch=self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        prompt = (
+            'Use only the IntentLock read_file and propose_patch tools. '
+            'First read src/auth/session.ts. Then call propose_patch once with the exact '
+            'unified Git diff below as the patch string. Copy only the diff bytes, without '
+            'Markdown fences or extra explanation. Stop after you receive the impact report ID.\n'
+            + safe_patch
+        )
+        if os.environ.get('INTENTLOCK_KIRO_GENERATE_PATCH') == '1':
+            prompt = (
+                'Use only the IntentLock read_file and propose_patch tools. Read src/auth/session.ts. '
+                'Fix the timeout bug by changing the comparison to '
+                'now - createdAt >= timeoutSeconds * 1000. Generate a valid unified Git diff for '
+                'src/auth/session.ts and submit it with propose_patch. Stop after receiving its impact report ID.'
+            )
+        command=[sys.executable,'-B',str(ROOT/'apps/mcp-server/launch_kiro.py'),
+                 '--repository',str(self.repo),'--run-id',run['run_id'],
+                 '--contract-id',contract['contract_id'],'--contract-version',str(contract['version']),
+                 '--prompt',prompt]
+        env=os.environ | {'INTENTLOCK_API_URL':self.api_url,'INTENTLOCK_INTERNAL_TOKEN':self.token,
+                          'KIRO_CLI_BINARY':shutil.which('kiro-cli')}
+        runner=subprocess.Popen(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+        try:
+            output,_=runner.communicate(timeout=180)
+        except subprocess.TimeoutExpired:
+            self.client.request('/api/runs/'+run['run_id']+'/stop',{})
+            runner.communicate(timeout=10)
+            self.fail('real Kiro did not finish within 180 seconds')
+        events=self.client.request('/api/runs/'+run['run_id']+'/events')['events']
+        tools=[e for e in events if e['event_type']=='tool_request']
+        impacts=[e['details']['impact_report_id'] for e in events if e['event_type']=='impact_report'
+                 and isinstance(e.get('details'),dict) and e['details'].get('impact_report_id')]
+        self.assertIn('read_file',[e['tool'] for e in tools])
+        self.assertIn('propose_patch',[e['tool'] for e in tools])
+        self.assertTrue(impacts, {'exit_code':runner.returncode,'tools':[e['tool'] for e in tools],
+                                  'preview_errors':re.findall(r'IMPACT_BLOCKED:[A-Za-z0-9_]+',output)})
+        report=self.client.request('/api/impact/'+impacts[-1])
+        self.assertEqual(report['decision'],'pass', [f['code'] for f in report['findings']])
+        self.assertEqual(self.client.run(run['run_id'])['status'],'completed')
+        self.assertEqual(subprocess.check_output(['git','-C',str(self.repo),'status','--porcelain']),b'')
+        path='/api/impact/'+report['impact_report_id']
+        self.post(path+'/approve',{'reviewer':'reviewer','patch_sha256':report['patch_sha256'],'base_commit':self.base})
+        promotion=self.post(path+'/promote',{'requested_by':'reviewer','patch_sha256':report['patch_sha256']})
+        self.assertEqual(promotion['promotion']['status'],'promoted',promotion)
+        self.assertIn('timeoutSeconds * 1000',(self.repo/'src/auth/session.ts').read_text())

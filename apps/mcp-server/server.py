@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import urllib.request
@@ -85,8 +86,11 @@ class Server:
         else:
             try:
                 result=json.dumps(preview(Client.from_env(), self.repository.root, self.run_id, self.contract_id, self.version, args['patch']))
-            except Exception:
-                raise Denied('IMPACT_BLOCKED') from None
+            except Exception as exc:
+                reason = str(exc)
+                safe_reason = reason if re.fullmatch(r'[A-Z][A-Z0-9_]{2,63}', reason) else type(exc).__name__
+                print('TWIN_GUARD_ERROR=' + safe_reason, file=sys.stderr, flush=True)
+                raise Denied('IMPACT_BLOCKED:' + safe_reason) from None
         return {'content': [{'type': 'text', 'text': result}], 'isError': False}
 
     def serve(self):

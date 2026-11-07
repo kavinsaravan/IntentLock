@@ -79,5 +79,21 @@ class Client:
     def register(self, run_id, pid):
         return self.request('/internal/runs/' + quote(run_id, safe='') + '/agent', {'agent_process_id': str(pid)})
 
+    def finish(self, run_id, status, reason=None):
+        if status not in ('completed', 'failed'):
+            raise ControlPlaneError('INVALID_RUN_STATE')
+        body = {'status': status}
+        if reason is not None:
+            body['reason'] = reason[:200]
+        response = self.request('/internal/runs/' + quote(run_id, safe='') + '/state', body)
+        try:
+            run = response['run']
+            validate('run', run)
+            if run['run_id'] != run_id or not isinstance(response['transitioned'], bool):
+                raise ValueError('Wrong run or transition')
+        except Exception:
+            raise ControlPlaneError('INVALID_RUN_STATE') from None
+        return response
+
     def event(self, run_id, message):
         return self.request('/internal/events', {'run_id': run_id, 'event_type': 'agent_event', 'message': message})

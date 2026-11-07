@@ -1,75 +1,29 @@
-# Person 2 execution plane
+# IntentLock Kiro MCP execution plane
 
-Scope: Kiro CLI coding agents for security/platform/DevOps teams. Python 3.11+.
-Install dependencies with `python3 -m pip install -r apps/mcp-server/requirements.txt`.
+The launcher gives Kiro an IntentLock-only MCP profile for controlled repository reads and patch proposals. Each tool call is authorized by the control plane. `@intentlock/propose_patch` previews a patch in the Docker TwinGuard sandbox and submits its impact report for human review; it does not alter the protected repository. See [the sandbox setup](../../packages/sandbox-provider/README.md).
 
-Implemented: stdio MCP initialization/discovery/ping and authorized bounded UTF-8
-`read_file`; schema-validated HTTP authorization; Kiro process registration and
-polling of authoritative run state; graceful process-group stop and hard-kill fallback.
-Missing/malformed authorization fails closed. No mutation tools are exposed yet.
+Set `INTENTLOCK_API_URL` to the localhost control plane, `INTENTLOCK_INTERNAL_TOKEN` to its internal token, and either `INTENTLOCK_ARTIFACT_DIR` or `INTENTLOCK_ARTIFACT_BUCKET`. For S3, also set `INTENTLOCK_AWS_PROFILE` if needed. The launcher passes only configured artifact settings to the MCP server; unset values are never forwarded as literal placeholders. Build the sandbox image and configure the promoter before proposing patches.
 
-## Launch
-
-Set `INTENTLOCK_API_URL` (e.g. `http://127.0.0.1:8787`) and
-`INTENTLOCK_INTERNAL_TOKEN` to match Person 1's API. HTTP is restricted to localhost;
-remote connections require HTTPS. Redirects are rejected. The client uses
-`X-IntentLock-Internal-Token`, never a Bearer header.
-
-Create an approved contract and active run through the control plane first, then:
+After creating an approved contract and active run, launch:
 
 ```sh
-python3 -B apps/mcp-server/launch_kiro.py --repository demo/repository --run-id RUN_ID --contract-id CONTRACT_ID --contract-version 1
+.venv/bin/python -B apps/mcp-server/launch_kiro.py --repository /absolute/path/to/demo-repo --run-id RUN_ID --contract-id CONTRACT_ID --contract-version 1
 ```
 
-`--print-profile` inspects the config without launching. `KIRO_CLI_BINARY` optionally
-specifies an absolute binary path. Authenticate Kiro with `kiro-cli login` first. The launcher explicitly selects
-Kiro V3 so the custom agent profile loads.
-The launcher uses a fresh temporary directory, only the IntentLock MCP read tool,
-no inherited MCP configuration/powers, and denied built-in capabilities. See
-https://kiro.dev/docs/custom-agents/configuration-reference/.
+Authenticate Kiro with `kiro-cli login` first. `KIRO_CLI_BINARY` can select an absolute binary path. `--print-profile` shows the generated profile without launching Kiro. The launcher selects Kiro V3 and starts the agent in a new process group. Its supervisor registers the PID, polls run state, handles SIGTERM, cleans up the process group, and reports `completed` or `failed` through the control plane's terminal-state endpoint. A stopped or blocked run stays terminal. If group signaling is denied, it falls back to signaling the direct process and reports failure; descendant cleanup then cannot be guaranteed.
 
-The supervisor registers Kiro's PID, checks run identity/state every 200 ms between
-HTTP calls, and terminates the process group on a terminal state, unavailable or
-malformed run response, interruption, or a 600-second local timeout. HTTP timeout
-is two seconds: this is not a guaranteed sub-second stop SLA. Each tool separately
-reauthorizes, preserving immediate denial after the control plane commits stop.
+The control-plane HTTP timeout is two seconds, so polling is not a guaranteed sub-second stop mechanism. Tool authorization is checked separately on every call. Kiro itself runs outside Docker; Docker isolates the patch preview, not the Kiro process.
 
-## Tests
+## Verification
 
 ```sh
-python3 -B -m pytest -q tests/sandbox
-INTENTLOCK_PERSON1_CHECKOUT=/path/to/isolated/ali-checkout python3 -B -m pytest -q tests/sandbox
+INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/isolated/Ali-checkout .venv/bin/python -B -m unittest discover -s tests/sandbox -v
 ```
 
-Integration tests run Ali's actual FastAPI app on an ephemeral localhost port,
-create test contracts/runs, exercise the MCP subprocess and check process shutdown.
-Without the checkout variable, the two cross-workstream tests are explicitly skipped.
-Install Ali's API dependencies in your Python environment for integration tests.
-
-Opt-in live test (authenticated Kiro and model access required). Verified on
-2026-11-07 against Ali commit `1bfd0ff`: ALLOW, then PROTECTED_PATH:
+The suite exercises the real local control-plane HTTP API, SIGTERM, stopped-run precedence, Docker isolation and patch promotion. The full authenticated Kiro workflow is opt in:
 
 ```sh
-INTENTLOCK_PERSON1_CHECKOUT=/path/to/isolated/ali-checkout python3 -B tests/sandbox/kiro_smoke.py
+INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/isolated/Ali-checkout INTENTLOCK_REAL_KIRO=1 INTENTLOCK_KIRO_GENERATE_PATCH=1 .venv/bin/python -B -m unittest discover -s tests/sandbox -p test_twinguard_api.py -k real_kiro -v
 ```
 
-The synthetic prompt explicitly asks for an allowed read and a protected read; it
-tests routing, not whether a model is susceptible to a prompt-injection payload.
-
-## Shared schema agreement
-
-Accept Person 1's proposed schema 0.1.0 wire formats and six deviations in his handoff.
-`pass` still requires human patch approval. `request_permission`/`finish_task` are
-not exposed by this increment. JSON schemas in `schemas/` are unmodified snapshots
-from `origin/Ali-Person-1`; the canonical files remain `packages/contracts/schemas`.
-Coordinate updates with Ali and refresh these snapshots together. Do not edit them
-independently. Tests validate real request/decision/run payloads against them.
-
-## Remaining work
-
-Authenticated Kiro end-to-end verification; list/search with per-result filtering;
-container sandbox implementation; trusted tests and patch fixtures; impact analysis;
-reviewed patch promotion; S3 artifacts; AgentCore Gateway and Code Interpreter.
-The provider file is an interface only, Docker is unavailable, and no AWS deployment
-has been performed. The demo repository is a source fixture, not a clean standalone
-Git snapshot. Public API authentication remains Person 1's known demo limitation.
+Set `INTENTLOCK_ARTIFACT_BUCKET` and `INTENTLOCK_AWS_PROFILE` to exercise live S3 evidence. The opt-in test uses real Kiro and MCP, Docker preview, human-review API calls and exact-hash promotion against a temporary Git repository. It does not automate browser clicks in the dashboard.

@@ -17,6 +17,38 @@ class SandboxError(Exception):
     pass
 
 
+def isolation_flags(container):
+    return ['--name', container, '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+            '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '512m', '--cpus', '1',
+            '--user', '65534:65534', '--tmpfs', '/work:rw,mode=1777,size=128m']
+
+
+def probe_isolation():
+    """Exercise the same Docker security flags used for patch execution."""
+    script = (
+        "const os=require('node:os'),fs=require('node:fs'),net=require('node:net');"
+        "let writeDenied=false;try{fs.writeFileSync('/etc/intentlock-probe','x')}catch(e){writeDenied=true}"
+        "const finish=(error)=>console.log(JSON.stringify({interfaces:Object.keys(os.networkInterfaces()),writeDenied,networkError:error}));"
+        "const s=net.createConnection({host:'1.1.1.1',port:80});s.setTimeout(1000);"
+        "s.once('error',e=>finish(e.code));s.once('connect',()=>{finish(null);s.destroy()});"
+        "s.once('timeout',()=>{finish('TIMEOUT');s.destroy()});"
+    )
+    container = 'intentlock-probe-' + uuid.uuid4().hex[:16]
+    command = ['docker', 'run', '--rm', *isolation_flags(container), IMAGE, 'node', '-e', script]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        subprocess.run(['docker', 'rm', '-f', container], capture_output=True, timeout=10)
+        raise SandboxError('ISOLATION_PROBE_TIMEOUT') from None
+    if result.returncode:
+        raise SandboxError('ISOLATION_PROBE_FAILED')
+    import json
+    proof = json.loads(result.stdout)
+    if proof['interfaces'] != ['lo'] or not proof['writeDenied'] or proof['networkError'] not in ('ENETUNREACH', 'EHOSTUNREACH'):
+        raise SandboxError('ISOLATION_INVARIANT_FAILED')
+    return proof
+
+
 def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL).decode().strip()
 
@@ -70,9 +102,7 @@ def execute(repo, base, patch, *, run_test=True, timeout=60):
         out.chmod(0o777)
         runner = Path(__file__).with_name('runner.sh').resolve()
         container = 'intentlock-tg-' + uuid.uuid4().hex[:16]
-        cmd = ['docker', 'run', '--rm', '--name', container, '--network', 'none', '--read-only', '--cap-drop', 'ALL',
-               '--security-opt', 'no-new-privileges', '--pids-limit', '64', '--memory', '512m', '--cpus', '1',
-               '--user', '65534:65534', '--tmpfs', '/work:rw,mode=1777,size=128m',
+        cmd = ['docker', 'run', '--rm', *isolation_flags(container),
                '--mount', f'type=bind,src={inp},dst=/input,readonly',
                '--mount', f'type=bind,src={patch_dir},dst=/patch,readonly',
                '--mount', f'type=bind,src={out},dst=/out',

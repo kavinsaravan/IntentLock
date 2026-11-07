@@ -91,9 +91,48 @@ class Integration(unittest.TestCase):
             thread.join(5)
             self.assertFalse(thread.is_alive())
             self.assertEqual(result,[2])
+            self.assertEqual(self.client.run(run['run_id'])['status'],'stopped')
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(pid),0)
         finally:
             if thread.is_alive():
                 self.client.request('/api/runs/'+run['run_id']+'/stop',{})
                 thread.join(5)
+
+    def test_supervisor_reports_completion_and_failure(self):
+        for exit_code, expected in ((0, 'completed'), (7, 'failed')):
+            with self.subTest(exit_code=exit_code):
+                run = self.new_run()
+                result = supervise([sys.executable, '-c', f'raise SystemExit({exit_code})'],
+                                   str(ROOT), self.client, run['run_id'], run['contract_id'], 1)
+                self.assertEqual(result, 0 if exit_code == 0 else 2)
+                self.assertEqual(self.client.run(run['run_id'])['status'], expected)
+                events = self.client.request('/api/runs/'+run['run_id']+'/events')['events']
+                self.assertEqual(sum(e['event_type'] == 'run_completed' for e in events), 1)
+
+    def test_sigterm_handler_reports_failure_and_cleans_child(self):
+        run = self.new_run()
+        with tempfile.TemporaryDirectory() as folder:
+            standin = Path(folder) / 'kiro-standin'
+            standin.write_text('#!/bin/sh\nsleep 30\n')
+            standin.chmod(0o700)
+            env = os.environ | {'INTENTLOCK_API_URL':self.url, 'INTENTLOCK_INTERNAL_TOKEN':'integration-only',
+                                'KIRO_CLI_BINARY':str(standin)}
+            command = [sys.executable, '-B', str(ROOT/'apps/mcp-server/launch_kiro.py'),
+                       '--repository',str(ROOT/'demo/repository'), '--run-id',run['run_id'],
+                       '--contract-id',run['contract_id'],'--contract-version','1']
+            runner = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                for _ in range(100):
+                    child = self.client.run(run['run_id']).get('agent_process_id')
+                    if child: break
+                    time.sleep(.05)
+                else: self.fail('agent PID was never registered')
+                os.kill(runner.pid, signal.SIGTERM)
+                self.assertEqual(runner.wait(timeout=8), 2)
+                self.assertEqual(self.client.run(run['run_id'])['status'], 'failed')
+                with self.assertRaises(ProcessLookupError): os.kill(int(child), 0)
+            finally:
+                if runner.poll() is None:
+                    runner.kill()
+                    runner.wait(5)

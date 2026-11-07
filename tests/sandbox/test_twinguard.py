@@ -28,6 +28,12 @@ class TwinGuardTests(unittest.TestCase):
     def patch(self,old,new):
         file=self.repo/'src/auth/session.ts';original=file.read_text();file.write_text(original.replace(old,new));p=subprocess.check_output(['git','-C',str(self.repo),'diff']);file.write_text(original);return p
 
+    def test_docker_has_no_network_and_read_only_root(self):
+        proof = local.probe_isolation()
+        self.assertEqual(proof['interfaces'], ['lo'])
+        self.assertTrue(proof['writeDenied'])
+        self.assertIn(proof['networkError'], ('ENETUNREACH', 'EHOSTUNREACH'))
+
     def test_repository_archive_is_stable_and_rejects_credentials(self):
         one=local.archive_repository(self.repo,self.base)
         self.assertEqual(one,local.archive_repository(self.repo,self.base))
@@ -54,6 +60,25 @@ class TwinGuardTests(unittest.TestCase):
         self.assertEqual(report['decision'],'block')
         self.assertIn('CRITICAL_TEST_FAILURE',[f['code'] for f in report['findings']])
         self.assertEqual(git(self.repo,'status','--porcelain'),'')
+
+    def test_trusted_test_and_script_changes_are_blocked_inside_twinguard(self):
+        for relative, before, after in (
+            ('tests/auth/session.test.ts', "verifyToken('invalid')", "verifyToken('demo-valid-token')"),
+            ('package.json', 'node --experimental-strip-types', 'node --no-warnings --experimental-strip-types'),
+        ):
+            with self.subTest(relative=relative):
+                target = self.repo/relative
+                original = target.read_text()
+                self.assertIn(before, original)
+                target.write_text(original.replace(before, after))
+                patch = subprocess.check_output(['git','-C',str(self.repo),'diff'])
+                target.write_text(original)
+                result = local.execute(self.repo,self.base,patch)
+                contract = self.contract | {'allowed_paths':[relative]}
+                report = impact.analyze(result,contract,'run-test','sandbox-test')
+                self.assertEqual(report['decision'],'block')
+                self.assertIn('TRUSTED_TEST_MODIFIED', [finding['code'] for finding in report['findings']])
+                self.assertEqual(git(self.repo,'status','--porcelain'),'')
 
     def test_stopped_and_tampered_promotion_refused(self):
         patch=self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
