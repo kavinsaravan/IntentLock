@@ -46,6 +46,6 @@ if __name__ == '__main__':
         agents = Path(workspace) / '.kiro' / 'agents'
         agents.mkdir(parents=True)
         (agents / 'intentlock.json').write_text(json.dumps(config))
-        result = supervise([os.environ.get('KIRO_CLI_BINARY', 'kiro-cli'), 'chat', '--agent', 'intentlock', '--trust-workspace',
+        result = supervise([os.environ.get('KIRO_CLI_BINARY', 'kiro-cli'), 'chat', '--v3', '--agent', 'intentlock', '--trust-workspace',
                                  '--require-mcp-startup', '--no-interactive', a.prompt], cwd=workspace, client=client, run_id=a.run_id, contract_id=a.contract_id, version=a.contract_version)
         sys.exit(result)

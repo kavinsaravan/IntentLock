@@ -36,13 +36,15 @@ MCP subprocess → actual API → ALLOW, PROTECTED_PATH, RUN_NOT_ACTIVE; checked
 contain decisions without file contents. Stop test uses a real sleeping subprocess
 and verifies it is gone after API stop (not a live Kiro model session).
 
-Actual Kiro smoke attempted: binary launches but reports **Not logged in**. No live
-model-generated tool call was observed. Run `kiro-cli login`, then the documented
-`tests/sandbox/kiro_smoke.py` opt-in test. No account credentials were changed.
+Actual Kiro 3.1 smoke passed against the local API from `origin/Ali-Person-1` at
+`1bfd0ff`: authenticated Kiro made a real MCP `read_file` call (ALLOW), then a
+second call for `.env` was denied (PROTECTED_PATH). The blocked run terminated
+the launcher with exit code 2. The launcher now explicitly selects Kiro V3;
+without `--v3`, its custom agent was not found.
 
 ## Known limits / next steps
 
-- Live Kiro authentication required; actual tool exposure must be inspected in session.
+- Authenticated Kiro MCP traffic is verified; inspect full tool exposure in an interactive session before claiming all possible Kiro data access is mediated.
 - Docker absent; no sandbox, patch inspection or promotion implemented yet.
 - No AgentCore/S3 or AWS deployment yet.
 - Read is the only exposed tool. List/search need per-result policy filtering.
@@ -72,10 +74,9 @@ this branch after review; no control-plane files are included in this commit.
 4. Keep `/internal/authorize` as the deterministic authority for each MCP call, with
    `X-IntentLock-Internal-Token`. Keep authorization and event writes serialized or
    atomic when replacing the in-memory store with DynamoDB.
-5. Once Kiro is authenticated locally, run the live smoke command in
-   `apps/mcp-server/README.md` together. Check the active run feed for actual Kiro
-   MCP requests and verify that no built-in file/shell tools are available. Do not
-   present the current synthetic API test as real Kiro traffic.
+5. The live Kiro smoke now passes. Integrate the branch and repeat it against the
+   combined application. Inspect the active run feed for real MCP requests and
+   verify that no built-in file/shell tools are available in the Kiro profile.
 6. Agree on the contract's trusted test catalogue before mutation work: agent-editable
    `package.json` or `tests/auth/**` must not be able to weaken the regression suite.
 

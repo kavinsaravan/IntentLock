@@ -22,7 +22,8 @@ python3 -B apps/mcp-server/launch_kiro.py --repository demo/repository --run-id 
 ```
 
 `--print-profile` inspects the config without launching. `KIRO_CLI_BINARY` optionally
-specifies an absolute binary path. Authenticate Kiro with `kiro-cli login` first.
+specifies an absolute binary path. Authenticate Kiro with `kiro-cli login` first. The launcher explicitly selects
+Kiro V3 so the custom agent profile loads.
 The launcher uses a fresh temporary directory, only the IntentLock MCP read tool,
 no inherited MCP configuration/powers, and denied built-in capabilities. See
 https://kiro.dev/docs/custom-agents/configuration-reference/.
@@ -45,7 +46,8 @@ create test contracts/runs, exercise the MCP subprocess and check process shutdo
 Without the checkout variable, the two cross-workstream tests are explicitly skipped.
 Install Ali's API dependencies in your Python environment for integration tests.
 
-Opt-in live test (authenticated Kiro and model access required):
+Opt-in live test (authenticated Kiro and model access required). Verified on
+2026-11-07 against Ali commit `1bfd0ff`: ALLOW, then PROTECTED_PATH:
 
 ```sh
 INTENTLOCK_PERSON1_CHECKOUT=/path/to/isolated/ali-checkout python3 -B tests/sandbox/kiro_smoke.py
