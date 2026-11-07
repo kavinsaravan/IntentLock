@@ -1,0 +1,12 @@
+{
+  "request_id": "req_01",
+  "run_id": "run_01",
+  "contract_id": "contract_01",
+  "contract_version": 1,
+  "tool": "read_file",
+  "arguments": {
+    "path": "src/auth/session.ts"
+  },
+  "agent_id": "coding-agent-01",
+  "timestamp": "2026-11-07T10:01:00Z"
+}

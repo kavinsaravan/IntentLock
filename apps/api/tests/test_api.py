@@ -1,0 +1,210 @@
+import json
+import pathlib
+import time
+
+import pytest
+from fastapi.testclient import TestClient
+
+from intentlock_api.app import create_app
+from intentlock_api.store import LocalMemoryStore
+
+FIX = pathlib.Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures"
+TOKEN = "test-internal-token"
+H = {"X-IntentLock-Internal-Token": TOKEN}
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def draft():
+    return json.loads((FIX / "contract-draft.json").read_text())
+
+
+def fake_invoker(outputs):
+    it = iter(outputs)
+    return lambda system, user: next(it)
+
+
+@pytest.fixture
+def client():
+    return TestClient(create_app(LocalMemoryStore(), internal_token=TOKEN))
+
+
+def activate(client, d=None, **kw):
+    r = client.post("/api/contracts", json={"draft": d or draft(), "approved": True, "approved_by": "tester", **kw})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def start_run(client, c):
+    r = client.post("/api/runs", json={"contract_id": c["contract_id"], "contract_version": c["version"]})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def req(run, c, tool, args, rid="r1"):
+    return {"request_id": rid, "run_id": run["run_id"], "contract_id": c["contract_id"],
+            "contract_version": c["version"], "tool": tool, "arguments": args,
+            "agent_id": "a", "timestamp": "2026-11-07T10:01:00Z"}
+
+
+def authz(client, body, headers=H):
+    return client.post("/internal/authorize", json=body, headers=headers)
+
+
+# ---- contracts: human approval + bedrock safety ------------------------
+def test_approval_required(client):
+    r = client.post("/api/contracts", json={"draft": draft(), "approved": False, "approved_by": "x"})
+    assert r.status_code == 400 and r.json()["detail"] == "APPROVAL_REQUIRED"
+    r = client.post("/api/contracts", json={"draft": draft(), "approved_by": "x"})
+    assert r.status_code == 422
+
+
+def test_invalid_draft_cannot_be_activated(client):
+    bad = draft(); bad["network_access"] = True
+    assert client.post("/api/contracts", json={"draft": bad, "approved": True, "approved_by": "x"}).status_code == 422
+    bad = draft(); bad["allowed_paths"] = ["../../etc"]
+    assert client.post("/api/contracts", json={"draft": bad, "approved": True, "approved_by": "x"}).status_code == 422
+
+
+def test_propose_invalid_json_cannot_become_contract():
+    c = TestClient(create_app(LocalMemoryStore(), invoker=fake_invoker(["not json", "{still bad"]), internal_token=TOKEN))
+    r = c.post("/api/contracts/propose", json={"task": "fix it", "base_commit": SHA})
+    assert r.status_code == 502 and "CONTRACT_PROPOSAL_FAILED" in r.json()["detail"]
+    assert c.get("/api/contracts/x/versions/1").status_code == 404
+
+
+def test_propose_retries_once_and_returns_draft_not_contract():
+    good = json.dumps({k: v for k, v in draft().items() if k not in ("repository_id", "base_commit")})
+    c = TestClient(create_app(LocalMemoryStore(), invoker=fake_invoker(["oops", "```json\n" + good + "\n```"]), internal_token=TOKEN))
+    r = c.post("/api/contracts/propose", json={"task": "fix it", "base_commit": SHA, "repository_id": "demo"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["attempts"] == 2 and body["requires_human_approval"] is True
+    assert "contract_id" not in body["draft"] and body["draft"]["repository_id"] == "demo"
+
+
+def test_propose_cannot_enable_network_or_override_commit():
+    obj = {k: v for k, v in draft().items()}
+    obj["network_access"] = True; obj["base_commit"] = "f" * 40
+    c = TestClient(create_app(LocalMemoryStore(), invoker=fake_invoker([json.dumps(obj)]), internal_token=TOKEN))
+    d = c.post("/api/contracts/propose", json={"task": "t", "base_commit": SHA}).json()["draft"]
+    assert d["network_access"] is False and d["base_commit"] == SHA
+
+
+def test_new_version_supersedes_old(client):
+    c1 = activate(client)
+    c2 = activate(client, contract_id=c1["contract_id"])
+    assert c2["version"] == 2
+    assert client.get(f"/api/contracts/{c1['contract_id']}/versions/1").json()["status"] == "superseded"
+    assert client.get(f"/api/contracts/{c1['contract_id']}/versions/2").json()["status"] == "active"
+    run = start_run(client, c2)
+    # a run bound to v1 can no longer be created
+    assert client.post("/api/runs", json={"contract_id": c1["contract_id"], "contract_version": 1}).status_code == 409
+    assert authz(client, req(run, c2, "read_file", {"path": "src/auth/a.ts"})).json()["decision"] == "allow"
+
+
+# ---- internal auth -----------------------------------------------------
+def test_internal_endpoints_require_token(client):
+    c = activate(client); run = start_run(client, c)
+    b = req(run, c, "read_file", {"path": "src/auth/a.ts"})
+    assert authz(client, b, {}).status_code == 401
+    assert authz(client, b, {"X-IntentLock-Internal-Token": "wrong"}).status_code == 401
+    assert client.post("/internal/events", json={"run_id": run["run_id"], "event_type": "agent_event"}).status_code == 401
+
+
+def test_internal_api_fails_closed_without_configured_token():
+    c = TestClient(create_app(LocalMemoryStore(), internal_token=""))
+    assert c.post("/internal/authorize", json={}, headers=H).status_code == 503
+
+
+# ---- scenario A: allow, deny, stop, replay -----------------------------
+def test_scenario_a_deny_env_blocks_run_and_replays_denied(client):
+    c = activate(client); run = start_run(client, c)
+    ok = authz(client, req(run, c, "read_file", {"path": "src/auth/session.ts"}, "r1")).json()
+    assert (ok["decision"], ok["reason_code"]) == ("allow", "ALLOW")
+    ok2 = authz(client, req(run, c, "search_code", {"query": "timeout", "paths": ["src/auth/**"]}, "r2")).json()
+    assert ok2["decision"] == "allow"
+    bad = authz(client, req(run, c, "read_file", {"path": ".env"}, "r3")).json()
+    assert (bad["decision"], bad["reason_code"], bad["stop_run"]) == ("deny", "PROTECTED_PATH", True)
+    assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "blocked"
+    after = authz(client, req(run, c, "read_file", {"path": "src/auth/session.ts"}, "r4")).json()
+    assert (after["decision"], after["reason_code"]) == ("deny", "RUN_NOT_ACTIVE")
+    evs = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
+    tool_evs = [e for e in evs if e["event_type"] == "tool_request"]
+    assert [(e["request_id"], e["decision"], e["reason_code"]) for e in tool_evs] == [
+        ("r1", "allow", "ALLOW"), ("r2", "allow", "ALLOW"),
+        ("r3", "deny", "PROTECTED_PATH"), ("r4", "deny", "RUN_NOT_ACTIVE")]
+    assert all(e["status"] == "decided" and e["latency_ms"] is not None for e in tool_evs)
+    assert any(e["event_type"] == "run_stopped" for e in evs)
+    seqs = [e["seq"] for e in evs]; assert seqs == sorted(seqs) == list(range(1, len(seqs) + 1))
+
+
+def test_stop_run_commits_state_then_denies(client):
+    c = activate(client); run = start_run(client, c)
+    r = client.post(f"/api/runs/{run['run_id']}/stop", json={"reason": "user clicked stop"})
+    body = r.json()
+    assert r.status_code == 200 and body["state_committed"] is True and body["run"]["status"] == "stopped"
+    assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "stopped"  # state is durable at response time
+    d = authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"})).json()
+    assert d["reason_code"] == "RUN_NOT_ACTIVE"
+    assert client.post(f"/api/runs/{run['run_id']}/stop").json()["run"]["status"] == "stopped"  # idempotent
+
+
+def test_unknown_run_and_malformed_bodies_fail_closed(client):
+    c = activate(client); run = start_run(client, c)
+    ghost = req(run, c, "read_file", {"path": "src/auth/a.ts"}); ghost["run_id"] = "run_nope"
+    assert authz(client, ghost).json()["reason_code"] == "RUN_NOT_ACTIVE"
+    for bad in ({}, [], "x", {"request_id": "q"}):
+        d = authz(client, bad)
+        assert d.status_code == 200 and d.json()["decision"] == "deny"
+
+
+def test_tool_call_limit_via_api(client):
+    dr = draft(); dr["limits"]["max_tool_calls"] = 2
+    c = activate(client, dr); run = start_run(client, c)
+    codes = [authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"}, f"r{i}")).json()["reason_code"] for i in range(3)]
+    assert codes == ["ALLOW", "ALLOW", "TOOL_CALL_LIMIT_EXCEEDED"]
+
+
+def test_events_never_store_patch_contents_or_secrets(client):
+    c = activate(client); run = start_run(client, c)
+    secret = "TOPSECRETPATCHBODY"
+    patch = f"diff --git a/src/auth/a.ts b/src/auth/a.ts\n--- a/src/auth/a.ts\n+++ b/src/auth/a.ts\n@@ -1 +1 @@\n-a\n+{secret}\n"
+    assert authz(client, req(run, c, "propose_patch", {"patch": patch})).json()["decision"] == "allow"
+    authz(client, req(run, c, "search_code", {"query": "AKIAABCDEFGHIJKLMNOP", "paths": ["src/auth/**"]}, "r2"))
+    client.post("/internal/events", headers=H, json={"run_id": run["run_id"], "event_type": "agent_event",
+                "details": {"patch": secret, "token": "abc", "note": "ok"}})
+    dump = json.dumps(client.get(f"/api/runs/{run['run_id']}/events").json())
+    assert secret not in dump and "AKIAABCDEFGHIJKLMNOP" not in dump
+    assert "patch_sha256" in dump
+
+
+def test_audit_log_has_no_contents(client, caplog):
+    c = activate(client); run = start_run(client, c)
+    with caplog.at_level("INFO", logger="intentlock.audit"):
+        authz(client, req(run, c, "read_file", {"path": ".env"}))
+    assert "PROTECTED_PATH" in caplog.text and "arguments" not in caplog.text
+
+
+# ---- ingestion, agent info, streaming ---------------------------------
+def test_event_ingestion_and_agent_info(client):
+    c = activate(client); run = start_run(client, c)
+    r = client.post(f"/internal/runs/{run['run_id']}/agent", headers=H, json={"agent_process_id": "pid-42", "sandbox_id": "sb1"})
+    assert r.json()["agent_process_id"] == "pid-42"
+    r = client.post("/internal/events", headers=H, json={"run_id": run["run_id"], "event_type": "impact_report", "message": "blocked"})
+    assert r.status_code == 201
+    assert client.post("/internal/events", headers=H, json={"run_id": run["run_id"], "event_type": "tool_request"}).status_code == 422
+    assert client.post("/internal/events", headers=H, json={"run_id": "nope", "event_type": "agent_event"}).status_code == 404
+
+
+def test_sse_stream_delivers_real_events(client):
+    c = activate(client); run = start_run(client, c)
+    authz(client, req(run, c, "read_file", {"path": ".env"}))
+    with client.stream("GET", f"/api/runs/{run['run_id']}/events/stream?timeout_seconds=0.5") as r:
+        text = "".join(r.iter_text())
+    assert "event: tool_request" in text and "PROTECTED_PATH" in text and "event: run_stopped" in text
+
+
+def test_latency_is_measured_and_small(client):
+    c = activate(client); run = start_run(client, c)
+    d = authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"})).json()
+    assert 0 <= d["latency_ms"] < 250

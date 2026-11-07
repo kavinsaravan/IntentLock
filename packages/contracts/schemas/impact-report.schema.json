@@ -1,0 +1,236 @@
+{
+  "$defs": {
+    "ImpactFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "code",
+        "message"
+      ],
+      "title": "ImpactFinding",
+      "type": "object"
+    },
+    "ImpactSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "files_created": {
+          "minimum": 0,
+          "title": "Files Created",
+          "type": "integer"
+        },
+        "files_deleted": {
+          "minimum": 0,
+          "title": "Files Deleted",
+          "type": "integer"
+        },
+        "files_modified": {
+          "minimum": 0,
+          "title": "Files Modified",
+          "type": "integer"
+        },
+        "files_renamed": {
+          "minimum": 0,
+          "title": "Files Renamed",
+          "type": "integer"
+        },
+        "lines_added": {
+          "minimum": 0,
+          "title": "Lines Added",
+          "type": "integer"
+        },
+        "lines_deleted": {
+          "minimum": 0,
+          "title": "Lines Deleted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "files_created",
+        "files_modified",
+        "files_deleted",
+        "files_renamed",
+        "lines_added",
+        "lines_deleted"
+      ],
+      "title": "ImpactSummary",
+      "type": "object"
+    },
+    "ImpactTest": {
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": {
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "output_s3_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output S3 Key"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "timeout",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "test_id": {
+          "title": "Test Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "test_id",
+        "status",
+        "duration_ms"
+      ],
+      "title": "ImpactTest",
+      "type": "object"
+    }
+  },
+  "$id": "https://intentlock.dev/schemas/0.1.0/impact-report.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "base_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Base Commit",
+      "type": "string"
+    },
+    "contract_id": {
+      "title": "Contract Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "minimum": 1,
+      "title": "Contract Version",
+      "type": "integer"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "decision": {
+      "enum": [
+        "block",
+        "review_required",
+        "pass"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ImpactFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "impact_report_id": {
+      "title": "Impact Report Id",
+      "type": "string"
+    },
+    "patch_s3_key": {
+      "title": "Patch S3 Key",
+      "type": "string"
+    },
+    "patch_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Patch Sha256",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "sandbox_id": {
+      "title": "Sandbox Id",
+      "type": "string"
+    },
+    "summary": {
+      "$ref": "#/$defs/ImpactSummary"
+    },
+    "tests": {
+      "items": {
+        "$ref": "#/$defs/ImpactTest"
+      },
+      "title": "Tests",
+      "type": "array"
+    }
+  },
+  "required": [
+    "impact_report_id",
+    "run_id",
+    "sandbox_id",
+    "contract_id",
+    "contract_version",
+    "base_commit",
+    "patch_s3_key",
+    "patch_sha256",
+    "summary",
+    "tests",
+    "findings",
+    "decision",
+    "created_at"
+  ],
+  "title": "ImpactReport",
+  "type": "object",
+  "x-schema-version": "0.1.0"
+}

@@ -1,0 +1,13 @@
+{
+  "request_id": "req_01",
+  "decision": "allow",
+  "reason_code": "ALLOW",
+  "message": "Request is authorized by the mission contract.",
+  "evidence": {
+    "checked_paths": [
+      "src/auth/session.ts"
+    ]
+  },
+  "stop_run": false,
+  "latency_ms": 0.4
+}

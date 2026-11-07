@@ -1,0 +1,70 @@
+{
+  "$id": "https://intentlock.dev/schemas/0.1.0/authorization-decision.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "evidence": {
+      "additionalProperties": true,
+      "title": "Evidence",
+      "type": "object"
+    },
+    "latency_ms": {
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "number"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    },
+    "reason_code": {
+      "enum": [
+        "ALLOW",
+        "CONTRACT_NOT_FOUND",
+        "CONTRACT_VERSION_MISMATCH",
+        "CONTRACT_NOT_ACTIVE",
+        "RUN_NOT_ACTIVE",
+        "TOOL_NOT_ALLOWED",
+        "INVALID_ARGUMENTS",
+        "PATH_NOT_ALLOWED",
+        "PROTECTED_PATH",
+        "TEST_NOT_APPROVED",
+        "NETWORK_NOT_ALLOWED",
+        "TOOL_CALL_LIMIT_EXCEEDED",
+        "POLICY_ENGINE_ERROR",
+        "IMPACT_BLOCKED",
+        "STALE_BASE_COMMIT",
+        "PATCH_HASH_MISMATCH"
+      ],
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "stop_run": {
+      "default": false,
+      "title": "Stop Run",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "request_id",
+    "decision",
+    "reason_code",
+    "message",
+    "latency_ms"
+  ],
+  "title": "AuthorizationDecision",
+  "type": "object",
+  "x-schema-version": "0.1.0"
+}
