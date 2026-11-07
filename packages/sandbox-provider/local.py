@@ -1,5 +1,6 @@
 """Disposable Docker sandbox for the frozen TypeScript/Node demo scope."""
 import hashlib
+import gzip
 import os
 from pathlib import Path
 import shutil
@@ -27,7 +28,7 @@ def clean_base(repo):
     return git(repo, 'rev-parse', 'HEAD')
 
 
-def snapshot(repo, base, target):
+def _archive(repo, base):
     archive = subprocess.check_output(['git', '-C', str(repo), 'archive', '--format=tar', base])
     if len(archive) > 100_000_000:
         raise SandboxError('snapshot too large')
@@ -36,8 +37,19 @@ def snapshot(repo, base, target):
         members = tar.getmembers()
         if len(members) > 2000 or any(not m.isfile() and not m.isdir() for m in members):
             raise SandboxError('snapshot contains unsupported entry')
-        if any(part.startswith('.env') or part in ('.aws', '.ssh', '.git') for m in members for part in Path(m.name).parts):
+        if any(part.startswith('.env') or part in ('.aws', '.ssh', '.git', '.npmrc', '.pypirc', 'credentials', 'credentials.json', 'id_rsa', 'id_ed25519')
+               or part.endswith(('.pem', '.key')) for m in members for part in Path(m.name).parts):
             raise SandboxError('snapshot contains protected path')
+    return archive
+
+
+def archive_repository(repo, base):
+    return gzip.compress(_archive(repo, base), mtime=0)
+
+
+def snapshot(repo, base, target):
+    import io
+    with tarfile.open(fileobj=io.BytesIO(_archive(repo, base))) as tar:
         tar.extractall(target, filter='data')
 
 

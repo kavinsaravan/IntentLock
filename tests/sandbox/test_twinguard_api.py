@@ -18,9 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 P1 = os.environ.get('INTENTLOCK_PERSON1_CHECKOUT')
 sys.path.insert(0, str(ROOT / 'apps/mcp-server'))
 sys.path.insert(0, str(ROOT / 'packages/patch-promoter'))
+sys.path.insert(0, str(ROOT / 'packages/sandbox-provider'))
 from control_plane import Client
 from twinguard import preview
 import service as promoter_service
+from export_audit import export as export_audit
 
 
 @unittest.skipUnless(P1, 'Set INTENTLOCK_PERSON1_CHECKOUT')
@@ -30,7 +32,6 @@ class TwinGuardApi(unittest.TestCase):
         import uvicorn
         sys.path[:0] = [str(Path(P1)/'apps/api'), str(Path(P1)/'packages/policy-engine')]
         from intentlock_api.app import create_app
-        from intentlock_api.artifacts import LocalDirArtifactReader
         from intentlock_api.promoter import PromoterClient
         cls.temp = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temp.name)
@@ -44,18 +45,19 @@ class TwinGuardApi(unittest.TestCase):
         cls.artifacts.mkdir()
         cls.previous_artifact_dir = os.environ.get('INTENTLOCK_ARTIFACT_DIR')
         os.environ['INTENTLOCK_ARTIFACT_DIR'] = str(cls.artifacts)
+        cls.artifact_store = promoter_service.artifacts_module.from_env()
         cls.api_socket = socket.socket()
         cls.api_socket.bind(('127.0.0.1',0))
         cls.api_url = 'http://127.0.0.1:' + str(cls.api_socket.getsockname()[1])
         cls.token = 'local-internal-test-token'
         cls.reviewer_token = 'local-reviewer-test-token-long'
         cls.promoter_token = 'local-promoter-test-token-long'
-        verifier = promoter_service.Verifier(cls.repo, cls.artifacts, cls.api_url, cls.token)
+        verifier = promoter_service.Verifier(cls.repo, cls.artifact_store, cls.api_url, cls.token)
         cls.promoter = ThreadingHTTPServer(('127.0.0.1',0), promoter_service.handler(verifier, cls.promoter_token))
         cls.promoter_url = 'http://127.0.0.1:' + str(cls.promoter.server_address[1])
         cls.promoter_thread = threading.Thread(target=cls.promoter.serve_forever,daemon=True)
         cls.promoter_thread.start()
-        app = create_app(internal_token=cls.token, artifacts=LocalDirArtifactReader(str(cls.artifacts)),
+        app = create_app(internal_token=cls.token, artifacts=cls.artifact_store,
                          promoter=PromoterClient(cls.promoter_url,cls.promoter_token), reviewer_tokens={'reviewer':cls.reviewer_token})
         cls.api = uvicorn.Server(uvicorn.Config(app,log_level='error'))
         cls.api_thread = threading.Thread(target=cls.api.run,kwargs={'sockets':[cls.api_socket]},daemon=True)
@@ -127,3 +129,7 @@ class TwinGuardApi(unittest.TestCase):
         result=self.post(path+'/promote',{'requested_by':'reviewer','patch_sha256':good['patch_sha256']})
         self.assertEqual(result['promotion']['status'],'promoted',result)
         self.assertIn('timeoutSeconds * 1000',(self.repo/'src/auth/session.ts').read_text())
+        self.client.request('/internal/runs/'+run['run_id']+'/state', {'status':'completed'})
+        audit_key,audit_digest=export_audit(self.client,self.artifact_store,run['run_id'])
+        self.assertEqual(audit_key,f"runs/{run['run_id']}/audit/final.json")
+        self.assertEqual(len(audit_digest),64)

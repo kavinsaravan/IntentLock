@@ -19,6 +19,7 @@ def _module(path):
 
 
 core = _module(Path(__file__).with_name('promote.py'))
+artifacts_module = _module(Path(__file__).resolve().parents[1] / 'sandbox-provider' / 'artifacts.py')
 
 
 class Refused(Exception):
@@ -28,7 +29,7 @@ class Refused(Exception):
 class Verifier:
     def __init__(self, repository, artifact_dir, api_url, internal_token):
         self.repository = Path(repository).resolve(strict=True)
-        self.artifacts = Path(artifact_dir).resolve(strict=True)
+        self.artifacts = artifact_dir if hasattr(artifact_dir, 'read') else artifacts_module.LocalArtifacts(artifact_dir)
         self.api_url = api_url.rstrip('/')
         self.internal_token = internal_token
         if not (self.api_url.startswith('http://127.0.0.1:') or self.api_url.startswith('http://localhost:')):
@@ -91,10 +92,11 @@ class Verifier:
         contract = self.get(f"/api/contracts/{request['contract_id']}/versions/{request['contract_version']}")
         if contract.get('status') != 'active' or contract.get('base_commit') != request['base_commit']:
             raise Refused('CONTRACT_NOT_ACTIVE')
-        return self.artifacts / key
+        return key
 
     def promote(self, request):
-        artifact = self.verify(request)
+        key = self.verify(request)
+        artifact = self.artifacts.read(key)
         def state():
             return self.get('/api/runs/' + request['run_id']).get('status')
         return core.promote(self.repository, artifact, request['base_commit'], request['patch_sha256'], state)
@@ -134,5 +136,5 @@ if __name__ == '__main__':
     token = os.environ['INTENTLOCK_PROMOTER_TOKEN']
     if len(token) < 24:
         raise SystemExit('promoter token must be at least 24 characters')
-    verifier = Verifier(args.repository, os.environ['INTENTLOCK_ARTIFACT_DIR'], os.environ['INTENTLOCK_API_URL'], os.environ['INTENTLOCK_INTERNAL_TOKEN'])
+    verifier = Verifier(args.repository, artifacts_module.from_env(), os.environ['INTENTLOCK_API_URL'], os.environ['INTENTLOCK_INTERNAL_TOKEN'])
     ThreadingHTTPServer(('127.0.0.1', args.port), handler(verifier, token)).serve_forever()

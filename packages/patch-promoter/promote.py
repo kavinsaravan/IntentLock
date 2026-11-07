@@ -14,7 +14,7 @@ def promote(repo, artifact, base_commit, approved_sha256, run_status):
     with _lock:
         if run_status() not in ('active','completed'): raise PromotionRefused('RUN_NOT_ACTIVE')
         repo=Path(repo).resolve()
-        patch=Path(artifact).read_bytes()
+        patch=artifact if isinstance(artifact, bytes) else Path(artifact).read_bytes()
         if hashlib.sha256(patch).hexdigest()!=approved_sha256: raise PromotionRefused('PATCH_HASH_MISMATCH')
         head=_git(repo,'rev-parse','HEAD')
         if head.returncode or head.stdout.decode().strip()!=base_commit: raise PromotionRefused('STALE_BASE_COMMIT')

@@ -1,5 +1,6 @@
 """Real Docker isolation and exact-patch behavior on a disposable demo Git repo."""
 import importlib.util
+import gzip
 from pathlib import Path
 import shutil
 import subprocess
@@ -26,6 +27,15 @@ class TwinGuardTests(unittest.TestCase):
 
     def patch(self,old,new):
         file=self.repo/'src/auth/session.ts';original=file.read_text();file.write_text(original.replace(old,new));p=subprocess.check_output(['git','-C',str(self.repo),'diff']);file.write_text(original);return p
+
+    def test_repository_archive_is_stable_and_rejects_credentials(self):
+        one=local.archive_repository(self.repo,self.base)
+        self.assertEqual(one,local.archive_repository(self.repo,self.base))
+        self.assertIn(b'src/auth/session.ts',gzip.decompress(one))
+        (self.repo/'.env').write_text('synthetic=secret\n')
+        git(self.repo,'add','.env');git(self.repo,'commit','-qm','tracked secret')
+        with self.assertRaises(local.SandboxError):
+            local.archive_repository(self.repo,git(self.repo,'rev-parse','HEAD'))
 
     def test_safe_patch_only_promotes_after_review(self):
         patch=self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
