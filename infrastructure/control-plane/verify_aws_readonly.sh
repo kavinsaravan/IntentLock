@@ -77,7 +77,7 @@ if [ -n "${CODE_BUCKET:-}" ]; then
 else echo "  NOTE  CODE_BUCKET not set: choose an S3 bucket name for the Lambda zip (bucket names are global)"; fi
 
 echo "== Budgets (read-only)"
-BUD="$("${A[@]}" budgets describe-budgets --account-id "$ACCT" --query 'length(Budgets)' --output text 2>&1)" && echo "  existing budgets in this account: $BUD" || echo "  cannot read budgets ($(printf '%s' "$BUD" | err))"
+BUD="$("${A[@]}" budgets describe-budgets --account-id "$ACCT" --query 'length(Budgets || `[]`)' --output text 2>&1)" && echo "  existing budgets in this account: $BUD" || echo "  cannot read budgets ($(printf '%s' "$BUD" | err))"
 
 if [ "${LIST_MODELS:-0}" = "1" ]; then
   echo "== Bedrock (listing only, nothing invoked): Anthropic foundation models and inference profiles in $REGION"
