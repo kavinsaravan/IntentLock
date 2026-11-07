@@ -56,3 +56,28 @@ model-generated tool call was observed. Run `kiro-cli login`, then the documente
 
 See `apps/mcp-server/README.md` for launch and test commands. Person 1 can merge/cherry-pick
 this branch after review; no control-plane files are included in this commit.
+
+## For Ali: next control-plane steps
+
+1. Review this branch against `Ali-Person-1`. Keep the canonical 0.1.0 schemas in
+   `packages/contracts`; the three copies under `apps/mcp-server/schemas` are only a
+   temporary branch bridge. After integration, replace those copies with canonical
+   schema loading and run the cross-workstream tests.
+2. Expose a safe completion/failure state transition for the execution-plane runner.
+   Today `/internal/events` records an agent event but does not change `Run.status`.
+   Preserve the existing rule that stop commits state before reporting success.
+3. Wire the dashboard's launch action to an execution-plane runner using the returned
+   `run_id`, `contract_id`, and `contract_version`. The runner registers its PID through
+   `/internal/runs/{run_id}/agent`; the UI's stop action uses the existing API endpoint.
+4. Keep `/internal/authorize` as the deterministic authority for each MCP call, with
+   `X-IntentLock-Internal-Token`. Keep authorization and event writes serialized or
+   atomic when replacing the in-memory store with DynamoDB.
+5. Once Kiro is authenticated locally, run the live smoke command in
+   `apps/mcp-server/README.md` together. Check the active run feed for actual Kiro
+   MCP requests and verify that no built-in file/shell tools are available. Do not
+   present the current synthetic API test as real Kiro traffic.
+6. Agree on the contract's trusted test catalogue before mutation work: agent-editable
+   `package.json` or `tests/auth/**` must not be able to weaken the regression suite.
+
+Person 2's next work is the container sandbox, patch impact analysis, exact promotion,
+and later AgentCore integration. Those are not implemented in this branch yet.
