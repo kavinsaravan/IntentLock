@@ -8,7 +8,7 @@
 ## 2. Last Updated
 - UTC: 2026-11-07
 - Branch: `Ali-Person-1` (the PRD calls it `person1-control-plane`; actual name is `Ali-Person-1`)
-- Commit: `57d3c5c` (milestone 2: dashboard + run expiry; later commits may follow). Milestone 1 was `a66614d`.
+- Commit: `8064936` (milestone 3: DynamoDB store, Lambda handler, infra; earlier: `57d3c5c` dashboard, `a66614d` foundation)
 - Schema version: `0.1.0` (PROPOSED — not yet agreed with Person 2)
 
 ## 3. Current Status
@@ -25,7 +25,7 @@
 | CloudWatch | Lambda logs go to a CloudWatch log group once deployed; custom metrics NOT implemented |
 | React dashboard (5 screens) | Tested locally (manual browser run; unit tests for pure logic) |
 | Impact/approve/promote UI | Only exercised against a throwaway stub; backend endpoints do not exist |
-| Execution-plane integration | HTTP path built on both sides; cross-run status in §11 |
+| Execution-plane integration | **Tested locally, cross-workstream:** Person 2's `tests/sandbox` (15 tests incl. 2 real localhost HTTP MCP→API tests) pass against this branch at `8064936` (memory store). Not yet re-run on DynamoDB mode; no live Kiro/model traffic (their Kiro is not logged in) |
 
 ## 4. Completed Features
 - **Canonical schemas** — `packages/contracts/schemas/*.schema.json`, fixtures in `packages/contracts/fixtures/`, models in `packages/policy-engine/intentlock_policy/models.py`. Tested locally.
@@ -165,6 +165,7 @@ Milestone 3 results (2026-11-07):
 - Live: real `uvicorn` on memory (`:8787`) and on moto-DynamoDB (`:8788`): allow → `.env` deny (run → blocked) → `RUN_NOT_ACTIVE`, identical event sequences.
 - `cfn-lint infrastructure/control-plane/template.yaml` → clean. `build_lambda.sh` builds a 2.7 MB zip containing only `intentlock_api/{__init__,store,dynamo_store,service,lambda_handler}.py`, `intentlock_policy`, pydantic (no `app.py`, no `bedrock.py`, no fastapi). Zip was not executed (linux wheels).
 - Frontend unchanged: typecheck, 8 vitest, build all pass.
+- **Cross-workstream (real):** checked out Person 2 `origin/codex/person2-execution-plane@8a93b37` read-only in a temporary worktree and ran `INTENTLOCK_PERSON1_CHECKOUT=<clean checkout of origin/Ali-Person-1@8064936> python3 -B -m pytest -q tests/sandbox` → **15 passed** (their MCP stdio subprocess → my real FastAPI on a localhost port: ALLOW, PROTECTED_PATH, RUN_NOT_ACTIVE; stop terminates a real subprocess). This is a synthetic harness, NOT live Kiro/model traffic. Worktrees removed afterwards; nothing of theirs modified.
 
 ## 12. Known Issues and Blockers
 - **No real-AWS verification** of DynamoDB, Lambda, IAM, or Bedrock (needs account/region/target confirmation from you).
