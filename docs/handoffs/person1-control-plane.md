@@ -226,7 +226,7 @@ Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `Permission
 | Item | State (2026-11-07) |
 |---|---|
 | AWS CLI | Installed (`aws-cli/2.36.40`). |
-| Profile `intentlock` | **Still does NOT exist** on this machine (re-checked again; waiting for the owner's private `aws configure --profile intentlock`). Owner must run `aws configure --profile intentlock` privately (replacement key; region `us-east-1`; output `json`). |
+| Profile `intentlock` | **Exists** (region `us-east-1`, output `json`) but the stored access key id is only 4 characters (`AKIA`, truncated entry), so `sts get-caller-identity` fails with `InvalidClientTokenId`. Owner must re-run `aws configure --profile intentlock` and type the FULL 20-character key id (do not press Enter on the prefilled `[AKIA]`). All further AWS calls are on hold until identity succeeds. |
 | Identity / account / username match, service access, Bedrock model | **Not verified** until the profile exists. `infrastructure/control-plane/verify_aws_readonly.sh` is ready (read-only; checks identity, DynamoDB, Lambda, S3, CloudFormation incl. `validate-template`, CloudWatch/Logs, Bedrock listing, name conflicts, budgets, IAM simulation; never invokes a model). |
 | Nothing deployed | No AWS resource has been created, changed or deleted. Earlier read-only checks used the unrelated `default` profile and do not describe the shared account. |
 | Template | `cfn-lint` clean; resources now tagged `Project=IntentLock`, `Owner=person1-control-plane`. Not deployed. |
