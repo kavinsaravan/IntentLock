@@ -1,6 +1,6 @@
 # Handoff — Person 2 execution plane
 
-Updated: 2026-11-07. Branch: `codex/person2-execution-plane`.
+Updated: 2026-11-07. Branch: `kavinperson2branch`.
 Commit: use `git log -1 -- docs/handoffs/person2-execution-plane.md` after this milestone commit.
 Scope: Kiro CLI coding agents for security/platform/DevOps teams; broader agents deferred.
 
