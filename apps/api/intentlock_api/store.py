@@ -195,6 +195,16 @@ class LocalMemoryStore:
             return dict(p)
 
 
+DEFAULT_REGION = "us-east-1"   # the team's confirmed AWS region
+
+
+def aws_region(env=None) -> str:
+    """One region for every AWS client in the control plane: explicit env wins, otherwise us-east-1.
+    (Never the ambient CLI profile's region, which may differ: the default profile here is us-west-1.)"""
+    env = os.environ if env is None else env
+    return env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION") or DEFAULT_REGION
+
+
 def create_store_from_env(env: dict[str, str] | None = None):
     env = os.environ if env is None else env
     kind = (env.get("INTENTLOCK_STORE") or "memory").lower()
@@ -206,6 +216,6 @@ def create_store_from_env(env: dict[str, str] | None = None):
         table = env.get("INTENTLOCK_TABLE")
         if not table:
             raise StoreError("INTENTLOCK_TABLE is required when INTENTLOCK_STORE=dynamodb")
-        return DynamoStore(table, region=env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION"),
+        return DynamoStore(table, region=aws_region(env),
                            endpoint_url=env.get("INTENTLOCK_DDB_ENDPOINT") or None)
     raise StoreError(f"unknown INTENTLOCK_STORE {kind!r} (expected 'memory' or 'dynamodb')")

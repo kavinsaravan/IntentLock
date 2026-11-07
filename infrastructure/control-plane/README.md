@@ -48,5 +48,28 @@ INTENTLOCK_AWS_TEST_TABLE=<table> AWS_REGION=<region> python3 -m pytest apps/api
 - **Permissions the deploying principal needs:** `cloudformation:CreateStack/UpdateStack/DescribeStacks/DescribeStackEvents/GetTemplateSummary`; `iam:CreateRole/PutRolePolicy/AttachRolePolicy/PassRole/CreatePolicy/GetRole/GetPolicy` (scoped to `intentlock-*`); `dynamodb:CreateTable/DescribeTable/UpdateContinuousBackups/TagResource`; `lambda:CreateFunction/UpdateFunctionCode/GetFunction/CreateFunctionUrlConfig`; `logs:CreateLogGroup/PutRetentionPolicy`; `s3:PutObject/GetObject` on the code bucket.
 - **Runtime permissions (granted by the template):** the Lambda role may only `GetItem/PutItem/UpdateItem/Query` on that one table and write its own log group. No Scan, no Delete, no Bedrock. The API host (if it uses DynamoDB) needs the same table policy.
 
-### Read-only checks performed 2026-11-07 (no resources created or changed)
+### Earlier read-only checks (2026-11-07) — CORRECTION: wrong identity
+These ran with the machine's `default` CLI profile, which is IAM user `aparpia@scu.edu` in account `****8656` with profile region `us-west-1`. That is **not** confirmed to be the shared hackathon account or the `aparpia` user, so treat the findings below as about *that* account only and re-run `verify_aws_readonly.sh` with the `intentlock` profile.
+
+### (superseded) read-only checks performed 2026-11-07, `default` profile (no resources created or changed)
 `sts get-caller-identity` (credentials valid, an IAM *user* principal), `dynamodb list-tables` (0 tables in us-east-1), `cloudformation describe-stacks intentlock-control-plane-dev` (does not exist), `lambda get-function intentlock-authorizer` (does not exist), `lambda get-account-settings` (**ConcurrentExecutions limit = 10**, so reserved concurrency cannot be used meaningfully), `bedrock list-foundation-models --by-provider anthropic` (15 models listed; listing does NOT prove model access is granted — verify with a real invoke before relying on Bedrock). Nothing else was called.
+
+## Profile setup and read-only verification (do this first)
+The `intentlock` profile does not exist yet on this machine. Create it **privately in your own terminal** (never paste keys into chat or a file in this repo):
+```bash
+aws configure --profile intentlock      # access key id, secret, region us-east-1, output json
+```
+Then verify (read-only; creates/changes nothing; account id masked; Bedrock only listed, never invoked):
+```bash
+PROFILE=intentlock REGION=us-east-1 EXPECTED_USER=aparpia EXPECTED_ACCOUNT=<shared 12-digit account id> \
+  infrastructure/control-plane/verify_aws_readonly.sh
+```
+It checks identity/username/account, DynamoDB, Lambda, S3, CloudFormation (including `validate-template` on our template), CloudWatch/Logs, Bedrock model listing, and runs an IAM policy *simulation* for the deploy-time actions. Simulation is evidence, not proof; IAM, CloudFormation, Lambda and S3 write permissions are only truly confirmed by deploying.
+
+## Deployment readiness (assessment, nothing deployed)
+- **Stack:** `intentlock-control-plane-dev`, region `us-east-1`. Deploy with `--profile intentlock` and `--capabilities CAPABILITY_IAM` (no custom IAM names, so `CAPABILITY_NAMED_IAM` is not needed).
+- **DynamoDB:** 1 table (`intentlock-control-plane`, on-demand, SSE, PITR, Retain). **Lambda:** 1 function (`intentlock-authorizer`, python3.12 x86_64, 256 MB, 10 s). **Log group:** 1. **IAM:** 1 role + 2 managed policies. **S3:** NOT in the template — one bucket is needed to hold the Lambda zip (create it yourself or reuse one); a second bucket for TwinGuard patch/evidence artifacts is Person 2's and no S3 reader/writer exists yet.
+- **Environment variables:** Lambda (set by the template): `INTENTLOCK_STORE=dynamodb`, `INTENTLOCK_TABLE`. API host: `INTENTLOCK_INTERNAL_TOKEN`, `INTENTLOCK_STORE`, `INTENTLOCK_TABLE`, `AWS_REGION` (now defaults to `us-east-1` in code), `AWS_PROFILE=intentlock` (local only), `INTENTLOCK_BEDROCK_MODEL_ID`, `INTENTLOCK_REVIEWERS`, `INTENTLOCK_ARTIFACT_DIR` (local stand-in), `INTENTLOCK_PROMOTER_URL`/`INTENTLOCK_PROMOTER_TOKEN`, launcher variables (see `apps/api/.env.example`). Frontend: `VITE_API_URL` / `VITE_API_PROXY` / `VITE_DEMO_BASE_COMMIT`.
+- **Not deployable / missing:** the FastAPI app (only the authorizer Lambda is packaged; the API still runs locally), frontend hosting (Amplify), authentication for the public API, S3 artifact reader/writer, CloudWatch custom metrics/alarms/dashboard, AgentCore. Bedrock needs a model id (some models require a cross-region inference-profile id such as `us.<model>`) and granted model access — unverified.
+- **Config problems found and fixed:** the DynamoDB store used the ambient profile region (`us-west-1` for the default profile) while Bedrock defaulted to `us-east-1`; both now use one helper that defaults to `us-east-1` (explicit `AWS_REGION` still wins). `/health` shows `dynamodb:<table>@<region>`.
+- **Cost (approximate, from published us-east-1 on-demand pricing as I know it; not queried live — confirm on the AWS pricing pages):** DynamoDB on-demand about $1.25 per million write units and $0.25 per million read units; one authorization is roughly 6 reads + 7 writes, so about $0.00001 each (100k authorizations ≈ $1); PITR about $0.20/GB-month; Lambda 1M requests + 400k GB-s/month are free-tier, then $0.20/M requests; CloudWatch Logs about $0.50/GB ingested (30-day retention set); Function URL itself is free. **Main cost risk: Bedrock**, billed per token for the chosen model (each contract proposal is ≤2 calls × ≤1500 output tokens, but a public unauthenticated `/api/contracts/propose` could be spammed). Other risks: DynamoDB on-demand has no spend cap (bounded in practice by the 50-tool-call default per run); the Lambda account concurrency quota seen earlier was 10 (that account only). Recommend an AWS Budget alert before first deploy.

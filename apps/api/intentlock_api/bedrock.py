@@ -13,6 +13,8 @@ from pydantic import ValidationError
 
 from intentlock_policy.models import MissionContractDraft
 
+from .store import aws_region
+
 SYSTEM_PROMPT = """You draft least-privilege mission contracts for a coding agent.
 Return ONLY one JSON object (no prose, no code fences) with exactly these keys:
 mission (string), allowed_tools (subset of list_files, read_file, search_code,
@@ -61,7 +63,7 @@ def bedrock_invoker() -> Callable[[str, str], str]:
     model_id = os.environ.get("INTENTLOCK_BEDROCK_MODEL_ID")
     if not model_id:
         raise ProposalError("INTENTLOCK_BEDROCK_MODEL_ID is not set")
-    client = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    client = boto3.client("bedrock-runtime", region_name=aws_region())
 
     def invoke(system: str, user: str) -> str:
         resp = client.converse(modelId=model_id, system=[{"text": system}],

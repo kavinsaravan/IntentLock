@@ -197,15 +197,19 @@ Read from `origin/codex/person2-execution-plane@8a93b37` (unchanged since last c
 | 7 | TwinGuard sandbox, impact analyzer, patch promoter | NOT IMPLEMENTED (contract above is waiting on them) |
 
 ## 10. AWS Configuration
-| Service | State |
+Target: region `us-east-1`; stack `intentlock-control-plane-dev`; CLI profile `intentlock`; IAM user `aparpia`. **No credentials, keys or secrets are stored in this repo or this file.**
+| Item | State (2026-11-07) |
 |---|---|
-| DynamoDB | **Locally simulated (moto) and tested there. NOT verified on real AWS.** Template written, not deployed. A real-table check exists (`INTENTLOCK_AWS_TEST_TABLE=<table> pytest apps/api/tests/test_store_contract.py`) but has NOT been run |
-| Lambda | Handler implemented and tested locally with mocked DynamoDB; zip builds; **not deployed, not invoked on AWS** |
-| IAM | Least-privilege roles/policies in `template.yaml` (table-only GetItem/PutItem/UpdateItem/Query; log-group-only logs; no Bedrock); `cfn-lint` clean; **never applied** |
-| CloudWatch | Not configured (log group is created by the template when deployed); metrics not implemented |
-| Bedrock | Code only; not tested against AWS |
-| Amplify / AgentCore / S3 | Not started (Person 2 owns S3/AgentCore) |
-Nothing was deployed. The shell has ambient AWS credentials for some account; no AWS API call was made by any test (moto tests force fake credentials). Deploying needs your confirmation of account, region, and stack target. No credentials are stored in the repo.
+| AWS CLI | Installed (`aws-cli/2.36.40`). |
+| Profile `intentlock` | **Does NOT exist** on this machine (only `default`). Owner must run `aws configure --profile intentlock` privately; then `infrastructure/control-plane/verify_aws_readonly.sh`. |
+| Identity under `intentlock` | **Not verified** (profile missing). |
+| `default` profile (for information) | IAM user `aparpia@scu.edu`, account `****8656`, profile region `us-west-1`. This is NOT the `aparpia` user and is not confirmed to be the shared hackathon account. **My earlier read-only checks (DynamoDB list, stack/function lookups, Lambda limit 10, Bedrock listing) ran with this profile, so they describe that account only.** No further AWS calls were made after discovering this. |
+| Shared hackathon account id | Unknown to me — the owner must supply it (`EXPECTED_ACCOUNT`) so the script can confirm a match. |
+| DynamoDB / Lambda / S3 / Bedrock / CloudFormation / CloudWatch access under `intentlock` | **Not verified** (no profile). Script ready; deploy-time permissions can only be fully confirmed by deploying (IAM simulation is partial evidence). |
+| Store/Lambda/Bedrock region handling | Fixed: one `aws_region()` helper, default `us-east-1` (was: ambient profile region for DynamoDB). Test added. |
+| Template (`template.yaml`) | `cfn-lint` clean; `validate-template` not yet run against real CloudFormation (script does it). Not deployed. |
+| Moto (mocked AWS) tests | Pass; unchanged. Real-AWS tests: not run. |
+Readiness, costs, missing components, env vars: `infrastructure/control-plane/README.md` ("Deployment readiness").
 
 ## 11. Tests and Verification
 - `python3 -m pytest -q` → **116 passed** (contract 29, policy 66, API 21). Executed 2026-11-07. Added: expiry-before-denial (incl. invalid-args request on expired run), plain-GET expiry, `Last-Event-ID` resume, `request_permission`/`finish_task` conditionality (run state, contract state/version, limits, arguments).
@@ -257,11 +261,11 @@ Milestone 5 results (2026-11-07), project venv:
 ## 13. Decisions Needed From Person 2
 1. Confirm or counter-propose the TwinGuard contract in §9 (`POST /internal/impact`, artifact location, `POST /promote` request/response, `TRUSTED_TEST_MODIFIED`).
 2. Fix/confirm the open runner items (killpg PermissionError, SIGTERM handler, mission as prompt, call `/internal/runs/{id}/state`).
-3. Run the real-Kiro procedure against the combined app and inspect tool exposure interactively.
+3. Kavin owns ALL real-Kiro work: run the real-Kiro procedure against the combined app and inspect tool exposure interactively (Person 1 will not run Kiro).
 4. Replace `apps/mcp-server/schemas` copies with canonical loading; merge strategy via reviewed PRs — I have NOT merged anything.
 
 ## 14. Next Steps
-1. Run the combined dashboard→real Kiro procedure on a machine with authenticated Kiro and record the evidence (`tests/integration/README.md`).
-2. Person 2 implements sandbox + impact analyzer + promoter against the §9 contract; then replace the simulated data with real reports end to end.
-3. With the owner's go-ahead: deploy the stack (`intentlock-control-plane-dev`, us-east-1), run the real-table store tests, invoke the Lambda; then CloudWatch metrics and a real Bedrock invoke.
+1. **Owner:** create the `intentlock` profile privately (`aws configure --profile intentlock`), tell me the shared account id, then run `PROFILE=intentlock EXPECTED_USER=aparpia EXPECTED_ACCOUNT=<id> infrastructure/control-plane/verify_aws_readonly.sh` (or ask me to). Resolve any FAIL lines (permissions) before deploying.
+2. **Owner decisions before first deploy:** the S3 bucket for the Lambda zip; Bedrock model id + confirm model access; whether to add an AWS Budget alert; then explicit approval to deploy stack `intentlock-control-plane-dev` in `us-east-1`.
+3. **Kavin (all Kiro work):** run the real-Kiro procedure (`tests/integration/README.md`), fix the open runner items, build TwinGuard/promoter against the §9 contract. Person 1 does not run Kiro.
 
