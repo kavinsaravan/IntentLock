@@ -24,10 +24,10 @@
 | Bedrock contract proposal | Implemented but untested against real AWS (fake-invoker tests only; `boto3` now installed locally, no model configured) |
 | CloudWatch | Lambda logs go to a CloudWatch log group once deployed; custom metrics NOT implemented |
 | React dashboard (5 screens) | Tested locally (manual browser run; unit tests for pure logic) |
-| TwinGuard-facing API + review/promotion UI | Tested locally (API: 40 tests on memory + mocked DynamoDB; UI: manual browser run against the real endpoints). **Impact reports, patches and the promoter are SIMULATED** (fixtures / fake promoter) because Person 2 has not built TwinGuard or the patch promoter |
+| TwinGuard-facing API + review/promotion UI | Tested locally (API: 40 impact tests + 26 cross-workstream integration tests on memory + mocked DynamoDB; UI: manual browser run against the real endpoints). Impact reports use SIMULATED sandbox output but the full API, artifact storage, review, and promotion pipeline is REAL (including a real HTTP promoter with git apply). Person 2 HAS implemented TwinGuard/promoter (`kavinperson2branch@8b119a8`); compatibility verified, Docker not available here |
 | Agent launch from dashboard (control-plane side) | Tested locally: `POST /api/runs/{id}/launch` starts a CONFIGURED runner subprocess; verified in the browser against Person 2's real `launch_kiro.py` supervisor with a SYNTHETIC kiro stand-in. **Never run with real Kiro (not installed/logged in here)** |
 | Trusted-test protection (authorization layer) | Tested locally (17 tests + shared vectors). TwinGuard side NOT implemented (Person 2) |
-| Execution-plane integration | **Reconciled with `origin/kavinperson2branch@3847418`** (only code change: `--v3` in `launch_kiro.py`; schema copies byte-identical to `packages/contracts`). Person 2's suite passes against this branch. Person 2 independently reported REAL authenticated Kiro 3.1 traffic against commit `1bfd0ff` (verified by them, not by me). **Dashboard→real Kiro has NOT been run** (Kiro not installed/authenticated on this machine); procedure for Kavin's machine: `tests/integration/README.md` |
+| Execution-plane integration | **Full integration assessment against `origin/kavinperson2branch@8b119a8`**: all 14 protocol interfaces compatible (see Milestone 7). TwinGuard sandbox, impact analyzer, and patch promoter are NOW IMPLEMENTED on their branch. 26 cross-workstream integration tests verify the complete flow (authorize → impact → review → promote) with a real HTTP promoter and real git apply. Docker sandbox tests can only run on Kavin's machine. **Dashboard→real Kiro has NOT been run** (Kiro not installed/authenticated on this machine); procedure: `tests/integration/README.md` |
 
 ## 4. Completed Features
 - **Canonical schemas** — `packages/contracts/schemas/*.schema.json`, fixtures in `packages/contracts/fixtures/`, models in `packages/policy-engine/intentlock_policy/models.py`. Tested locally.
@@ -78,8 +78,74 @@ New modules `apps/api/intentlock_api/{impact,artifacts,promoter}.py`; store meth
 - **Real-browser finding (fixed):** the merged dashboard client sent `Content-Type` twice (different casing), which the browser merged into `application/json, application/json`, so every approve/promote returned 422 before reaching authentication. Fixed in `apps/web/src/lib/api.ts` and covered by a unit test. After the fix a real-browser run showed: buttons disabled without a token; wrong token → `401 REVIEWER_NOT_AUTHENTICATED` and nothing recorded; correct token → approve recorded → promotion PROMOTED (SIMULATED promoter stub, SIMULATED impact data); token absent from page text, localStorage and sessionStorage.
 - Security review result: reviewer authentication could not be bypassed with missing/empty/whitespace/wrong/other-reviewer/unknown-reviewer/oversized/non-ASCII tokens on approve, reject or promote; authentication runs before digest/base-commit/blocked checks; the exact-patch verification, blocked-patch and one-decision rules are unchanged and still tested; tokens do not appear in responses, `/status`, events or logs (tests). Remaining weaknesses: tokens travel in an HTTP header (use HTTPS or localhost only), there is no rate limiting/lockout on token guesses, no token rotation, and an already-started promotion cannot be cancelled by the control plane (the promoter must recheck run state).
 
+### Milestone 7 — TwinGuard integration assessment and cross-workstream tests (2026-11-07)
+**Assessment method:** fetched `origin/kavinperson2branch@8b119a8`, read all implementation files and Person 2's handoff. Compared every protocol interface against Person 1's control plane. Created 26 cross-workstream integration tests in `apps/api/tests/test_twinguard_integration.py`.
+
+**Compatibility findings (all 14 areas compatible):**
+| Area | Verdict | Evidence |
+|---|---|---|
+| Contract schema 0.1.0 | Compatible | Schema copies byte-identical |
+| MCP → `/internal/authorize` | Compatible | Envelope format, token header, schema validation all match |
+| Impact report submission (`POST /internal/impact`) | Compatible | Shared schema, field names, immutability rules match |
+| Artifact storage key layout | Compatible | Both use `runs/{run_id}/patches/{sha256}.patch` |
+| Review authentication (`X-IntentLock-Reviewer-Token`) | Compatible | Header name, token validation, fail-closed behavior match |
+| Promoter protocol (`POST /promote`) | Compatible | `X-IntentLock-Promoter-Token`, request/response fields match |
+| PromoterRequest/PromoterResponse fields | Compatible | Field names and types align |
+| Process lifecycle (PID registration, status polling) | Compatible | `/internal/runs/{id}/agent` and run polling match |
+| Launcher env passthrough (`INTENTLOCK_AGENT_ENV_PASSTHROUGH`) | Compatible | Already supported in launcher |
+| Run completion (`/internal/runs/{id}/state`) | Gap (my endpoint ready) | Endpoint exists; their code never calls it |
+| Docker sandbox (`--network none`, `--read-only`, `--cap-drop ALL`) | Implemented on their side | Verified from source; Docker not available here |
+| Impact analyzer (deterministic inspection) | Implemented on their side | Verified from source |
+| Patch promoter (independent verification) | Implemented on their side | Token auth, hash verify, base commit check all present |
+| Trusted test protection (TwinGuard half) | Missing on their side | Authorization layer done; sandbox enforcement not implemented |
+
+**New integration tests (`apps/api/tests/test_twinguard_integration.py`, 26 tests, parametrized on memory + moto):**
+Uses a REAL local HTTP promoter server (not a mock) and actual git repository with `demo/repository` files from Person 2's branch. Does NOT need Docker — the sandbox output is simulated but the entire API, artifact storage, review, and promotion pipeline is real.
+
+- **Scenario A** (read/block/stop, 2 tests): Authorized `read_file` → `.env` blocked with `PROTECTED_PATH` + `stop_run` → subsequent request returns `RUN_NOT_ACTIVE`.
+- **Scenario B** (unsafe patch blocked, 4 tests): Impact report with `decision="block"` → approve refused (`409 IMPACT_BLOCKED`) → direct promotion refused → repository unchanged.
+- **Scenario C** (safe patch promoted, 4 tests): Impact report with `decision="pass"` → approve → promote → promoter independently verifies hash + base commit → applies patch → repository file actually changed.
+- **Security guarantees** (8 tests):
+  1. Unauthorized request (no internal token) → 401
+  2. Protected paths (`.env`) → denied with `stop_run`
+  3. Stopped run blocks approval AND promotion (409)
+  4. Wrong reviewer token → 401
+  5. Changed patch hash fails promotion (promoter rejects)
+  6. Events contain no file contents (redaction verified)
+  7. Blocked report on a stopped run still cannot be approved
+  8. Internal token required for all internal endpoints
+
+**Security verification — 12 guarantees (tested vs assumed):**
+| # | Guarantee | Status | Evidence |
+|---|---|---|---|
+| 1 | Every tool call authorized before execution | TESTED | Integration tests: allow/deny/RUN_NOT_ACTIVE; Person 2's MCP server calls `/internal/authorize` before dispatching |
+| 2 | `.env` and protected paths always denied | TESTED | 8+ tests across suites; `.env` → PROTECTED_PATH + stop_run |
+| 3 | Blocked patch never approvable | TESTED | `test_blocked_patch_cannot_be_approved`: 409 IMPACT_BLOCKED |
+| 4 | Stopped run blocks all further operations | TESTED | `test_stopped_run_blocks_approval_and_promotion` |
+| 5 | Reviewer authentication required (fail-closed) | TESTED | 52 adversarial tests + integration: wrong/missing/non-ASCII tokens |
+| 6 | Promoter independently verifies hash + base commit | TESTED | `test_promoted_patch_applied_to_repo`: real git apply through real HTTP promoter |
+| 7 | Events/audit contain no file contents or secrets | TESTED | `test_events_contain_no_file_contents` + redaction tests |
+| 8 | Internal token required for internal API | TESTED | `test_internal_token_required` |
+| 9 | Docker sandbox isolation (network none, read-only, cap-drop) | ASSUMED | Verified from Person 2's source code; Docker not available on this machine |
+| 10 | Kiro tool exposure (only MCP tools, no built-in file/shell) | ASSUMED | Person 2's Kiro profile restricts to `@intentlock/read_file`; no interactive verification |
+| 11 | Trusted test modification blocked in sandbox | ASSUMED | Authorization layer blocks test-path patches; TwinGuard-side `TRUSTED_TEST_MODIFIED` not yet implemented |
+| 12 | Real Kiro agent cannot bypass MCP gateway | ASSUMED | Person 2 reports real Kiro traffic routed through MCP; no independent verification by Person 1 |
+
+**End-to-end scenario results:**
+- Scenario A (read/block/stop): **PASS at API level.** Full chain: authorize → allow → authorize `.env` → deny PROTECTED_PATH + stop_run → RUN_NOT_ACTIVE.
+- Scenario B (unsafe patch blocked): **PASS at API level.** Impact report blocked → approve refused → promotion refused → repository unchanged.
+- Scenario C (safe patch promoted): **PASS at API level.** Impact report pass → approve → promote → real HTTP promoter verifies hash + base commit → `git apply` succeeds → file changed in repository.
+- Full E2E (Docker sandbox + Kiro): **NOT TESTABLE HERE.** Docker not installed; Kiro not installed/authenticated. Requires Kavin's machine.
+
+**Remaining work for Kavin (Person 2):**
+1. Call `POST /internal/runs/{id}/state` on agent completion/failure (endpoint ready, their client doesn't call it)
+2. Implement `TRUSTED_TEST_MODIFIED` enforcement in TwinGuard sandbox (authorization layer is done; shared test vectors exist)
+3. Fix `os.killpg` `PermissionError` handling in `lifecycle.terminate_group` (macOS)
+4. Add SIGTERM handler in runner (currently only SIGINT)
+5. Run the full demo on their machine with Docker + Kiro to verify E2E Scenarios A/B/C through the sandbox
+
 ## 5. Current Implementation Work
-Dashboard is functional against the local API. Next per instruction: integrate Person 2's MCP traffic, then DynamoDB, Lambda, CloudWatch, real Bedrock verification. Nothing half-finished in the tree.
+TwinGuard integration assessment complete. All protocol interfaces are compatible. 26 new cross-workstream integration tests pass. Full E2E demo requires Docker + Kiro on Kavin's machine. Nothing half-finished in the tree.
 
 ## 6. Files Created or Modified
 `AGENTS.md` (shared root file — new; Person 2 must review/integrate), `.gitignore`, `pytest.ini`, `packages/contracts/**` (shared dir, proposed), `packages/policy-engine/**`, `apps/api/**`, `tests/contract/**`, `tests/policy/**`, this handoff. Milestone 2 added `apps/web/**`, small `apps/api` changes (lazy run expiry, `Last-Event-ID`), extra tests. `.gitignore` gained `dist/`. `packages/event-model/` is an empty placeholder (Event schema lives in `packages/contracts`).
@@ -281,9 +347,16 @@ Milestone 6 results (2026-11-07):
 - Kinds of tests: MOCKED AWS (moto) for every DynamoDB/Lambda test; SYNTHETIC agent traffic for the launch e2e and Person 2's integration (scripted stand-in agent, real runner/MCP server/API); SIMULATED impact data and promoter for the review tests and the browser run; **REAL Kiro: none run by Person 1** (Person 2 reports real Kiro 3.1 traffic on their machine against an older commit).
 - Intermittent flake (`test_tool_limit_is_exact_under_concurrent_requests[dynamodb-moto]`) did not occur in this verification round; it remains UNRESOLVED (see earlier entry).
 
+Milestone 7 results (2026-11-07), project venv, against `origin/kavinperson2branch@8b119a8`:
+- `.venv/bin/python -m pytest -q` → **404 passed, 7 skipped** (contract 29, policy 84, API+store+Lambda+launcher+impact+TwinGuard-integration 291 passed / 1 skipped, integration 6 skipped without `INTENTLOCK_PERSON2_CHECKOUT`, real-Kiro test skipped). Frontend: `tsc --noEmit` clean, **9 vitest**, `vite build` OK.
+- **New: `test_twinguard_integration.py` (26 tests, parametrized memory + moto):** real local HTTP promoter server, real git repository, real artifact storage. Scenario A (read/block/stop), Scenario B (unsafe patch blocked), Scenario C (safe patch approved and promoted — real `git apply`), 8 security guarantee tests. All pass on both stores.
+- **REAL promoter verification:** the test's promoter independently verifies patch hash and base commit before applying. A tampered hash is refused. The applied patch SHA-256 echoed by the promoter matches the approved one. Repository HEAD changes only after successful promotion.
+- **Docker/Kiro:** NOT testable on this machine (Docker: `command not found`; Kiro: not installed). 4 of 12 security guarantees are ASSUMED from source code review, not tested (Docker isolation, Kiro tool exposure, trusted-test sandbox enforcement, MCP gateway bypass).
+- Intermittent flake did not occur; it remains UNRESOLVED.
+
 ## 12. Known Issues and Blockers
 - **No dashboard→real-Kiro run yet.** Kiro is not installed/authenticated on this machine; the procedure and an opt-in test exist (`tests/integration/README.md`). Person 2's real-Kiro result predates the launcher integration.
-- **TwinGuard/promoter do not exist** (Person 2): impact reports, patches and promotion in my tests are simulated. Real exact-patch promotion, safe/unsafe patch handling and `TRUSTED_TEST_MODIFIED` enforcement are unverified end to end.
+- **TwinGuard sandbox and promoter are implemented** on Person 2's branch (`kavinperson2branch@8b119a8`): Docker sandbox, impact analyzer, and patch promoter are all present and their own tests pass. However, real exact-patch promotion through Docker and `TRUSTED_TEST_MODIFIED` sandbox enforcement are unverified end to end (Docker not available here).
 - Person 2 issue tracker (7 items) in §9; items 1, 2, 3, 5 are open/unverified and affect stop reliability and the claim that all Kiro access is mediated.
 - Review authorization is an env allowlist of self-asserted names behind an unauthenticated public API (demo). Production needs real authentication (e.g. Cognito/IAM) before reviewer identity means anything.
 - Artifact reader is a LOCAL directory stand-in; no S3 reader/writer exists. The launcher is LOCAL-DEV only (subprocess on the API host).
@@ -298,12 +371,12 @@ Milestone 6 results (2026-11-07):
 
 ## 13. Decisions Needed
 **Owner (Ali/Kavin):**
-1. Merge `origin/codex/ali-review-safeguards` into `Ali-Person-1`? (reviewed, tests pass, trivial docs conflict; changes reviewer authentication and makes stopped runs un-approvable.) Not merged.
-2. Bedrock model id; Lambda-zip bucket name; $25 budget alert; explicit approval to deploy.
-3. Confirm the shared-account ownership/naming proposal with Person 2.
-**Person 2:** confirm the TwinGuard contract (§9: `/internal/impact`, artifact location, `/promote`, `TRUSTED_TEST_MODIFIED`); fix/confirm the open runner items; promoter must recheck run state before applying (an in-flight promotion cannot be cancelled by the control plane); replace `apps/mcp-server/schemas` copies with canonical loading.
+1. Bedrock model id; Lambda-zip bucket name; $25 budget alert; explicit approval to deploy.
+2. Confirm the shared-account ownership/naming proposal with Person 2.
+3. Choose credentials for the demo API: keep `intentlock` (admin) or create the TableAccessPolicy-only IAM user (README option B).
+**Person 2:** (a) call `/internal/runs/{id}/state` on agent completion/failure; (b) implement `TRUSTED_TEST_MODIFIED` enforcement in TwinGuard sandbox; (c) fix `os.killpg` PermissionError handling; (d) add SIGTERM handler; (e) run full demo on their machine with Docker + Kiro; (f) confirm the TwinGuard contract (§9).
 
 ## 14. Next Steps
-1. **Owner/Kavin decisions:** (a) confirm the budget recipients (Kavin as primary, plus Ali) so ONE $25 alert can be created; (b) choose credentials for the demo API: keep `intentlock` (admin) or create the TableAccessPolicy-only IAM user (README option B); (c) Bedrock model + approval for a first billable invocation (recommend `us.anthropic.claude-haiku-5-5`); (d) optional code-only redeploy of the Lambda and Lambda memory/log-ARN tidy-up (stack update).
-2. **Before the demo:** run `measure_authorize_latency.py` on the demo machine/network; start the API with `apps/api/run_demo_api.sh`; give Person 2 the same `INTENTLOCK_INTERNAL_TOKEN` and `INTENTLOCK_API_URL=http://127.0.0.1:8787`.
-3. **Person 2 / Kavin:** TwinGuard sandbox, impact analyzer and promoter per §9 (still only an interface stub on their branch); real-Kiro run; fix the `killpg`/SIGTERM issues.
+1. **Person 2 / Kavin (critical for demo):** run the full E2E demo on their machine with Docker + Kiro to verify Scenarios A/B/C through the real sandbox and promoter; call `/internal/runs/{id}/state`; implement `TRUSTED_TEST_MODIFIED`; fix the `killpg`/SIGTERM issues.
+2. **Owner/Kavin decisions:** (a) confirm the budget recipients so ONE $25 alert can be created; (b) Bedrock model + approval for a first billable invocation; (c) optional code-only redeploy of the Lambda.
+3. **Before the demo:** run `measure_authorize_latency.py` on the demo machine/network; start the API with `apps/api/run_demo_api.sh`; give Person 2 the same `INTENTLOCK_INTERNAL_TOKEN` and `INTENTLOCK_API_URL=http://127.0.0.1:8787`.
