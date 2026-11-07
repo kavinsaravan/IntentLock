@@ -233,6 +233,8 @@ Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `Permission
 | Person 2 | Their client cannot call the deployed Lambda (HTTP+token only; no Function URL). They keep using the HTTP API (can run on this table). |
 | Open | Swap AdministratorAccess for scoped policies; Lambda memory/cold start; tidy log ARN in template; budget; Bedrock model decision. |
 
+**Integration/latency update (2026-11-07):** API path, before/after latency (calls per authorization 9 → 6; steady p95 1,061 → 529 ms; max 1,134 → 662 ms; first call 1,509 → 514 ms; real HTTP through the launcher p50 438 / p95 487 / max 495 ms, 0 timeouts at 2 s), the secure launcher `apps/api/run_demo_api.sh`, credential options (A admin today / B dedicated TableAccessPolicy-only IAM user, needs approval / C in-region), and the demo checklist are in `infrastructure/control-plane/README.md` ("Integration path, latency fix and secure demo run"). Real DynamoDB tests re-run after the store changes: **87/87 pass** (a first run exposed a `TransactionConflictException` regression from reduced retries and a racy launcher test; both fixed; final run clean; test data removed, table empty). Default suite: 378 passed, 7 skipped. The DEPLOYED Lambda still runs the earlier code (no redeploy performed). Budget still NOT created (recipient confirmation pending; no emails stored in the repo).
+
 ## 11. Tests and Verification
 - `python3 -m pytest -q` → **116 passed** (contract 29, policy 66, API 21). Executed 2026-11-07. Added: expiry-before-denial (incl. invalid-args request on expired run), plain-GET expiry, `Last-Event-ID` resume, `request_permission`/`finish_task` conditionality (run state, contract state/version, limits, arguments).
 - Frontend: `cd apps/web && npx tsc --noEmit` clean; `npx vitest run` → 8 passed (event merge/dedupe, decision counts, latency percentiles, impact-id discovery, diff parser, error formatting); `npx vite build` OK. No component/E2E tests.
@@ -302,7 +304,6 @@ Milestone 6 results (2026-11-07):
 **Person 2:** confirm the TwinGuard contract (§9: `/internal/impact`, artifact location, `/promote`, `TRUSTED_TEST_MODIFIED`); fix/confirm the open runner items; promoter must recheck run state before applying (an in-flight promotion cannot be cancelled by the control plane); replace `apps/mcp-server/schemas` copies with canonical loading.
 
 ## 14. Next Steps
-1. **Owner/Kavin:** name the budget alert recipient so one $25 budget can be created (alert only, not a cap); choose the Bedrock model (recommend `us.anthropic.claude-haiku-5-5`) and approve a first (billable) invocation test.
-2. **Person 1:** run the API with `INTENTLOCK_STORE=dynamodb INTENTLOCK_TABLE=intentlock-control-plane AWS_PROFILE=intentlock` for the demo and re-measure latency from the demo machine; consider Lambda memory 512–1024 MB and the log-ARN tidy-up in a stack update (needs approval).
-3. **Kavin:** replace AdministratorAccess on `aparpia` with the scoped policies when convenient.
-4. **Person 2 / Kavin:** TwinGuard/promoter per §9; real-Kiro run; set `INTENTLOCK_REVIEWER_TOKENS`.
+1. **Owner/Kavin decisions:** (a) confirm the budget recipients (Kavin as primary, plus Ali) so ONE $25 alert can be created; (b) choose credentials for the demo API: keep `intentlock` (admin) or create the TableAccessPolicy-only IAM user (README option B); (c) Bedrock model + approval for a first billable invocation (recommend `us.anthropic.claude-haiku-5-5`); (d) optional code-only redeploy of the Lambda and Lambda memory/log-ARN tidy-up (stack update).
+2. **Before the demo:** run `measure_authorize_latency.py` on the demo machine/network; start the API with `apps/api/run_demo_api.sh`; give Person 2 the same `INTENTLOCK_INTERNAL_TOKEN` and `INTENTLOCK_API_URL=http://127.0.0.1:8787`.
+3. **Person 2 / Kavin:** TwinGuard sandbox, impact analyzer and promoter per §9 (still only an interface stub on their branch); real-Kiro run; fix the `killpg`/SIGTERM issues.

@@ -126,7 +126,7 @@ class LocalMemoryStore:
             self._events.setdefault(run_id, []).append(ev)
             return ev
 
-    def update_event(self, run_id: str, seq: int, **fields: Any) -> Event:
+    def update_event(self, run_id: str, seq: int, base: Event | None = None, **fields: Any) -> Event:
         with self._lock:
             lst = self._events[run_id]
             ev = lst[seq - 1].model_copy(update=fields)

@@ -2,6 +2,7 @@
 import asyncio
 import hmac
 import os
+from contextlib import asynccontextmanager
 import uuid
 from typing import Any, Callable, Literal
 
@@ -85,7 +86,14 @@ def create_app(store: Any = None, launcher: Any = None, artifacts: Any = "env", 
     reviewers = impact_api.reviewers_from_env() if reviewers == "env" else reviewers
     reviewer_tokens = impact_api.reviewer_tokens_from_env() if reviewer_tokens == "env" else reviewer_tokens
     token = internal_token if internal_token is not None else os.environ.get("INTENTLOCK_INTERNAL_TOKEN", "")
-    app = FastAPI(title="IntentLock control plane", version=SCHEMA_VERSION)
+    @asynccontextmanager
+    async def lifespan(_app):
+        warm = getattr(store, "warm_up", None)       # DynamoDB: open the connection before the first authorization
+        if warm is not None:
+            await asyncio.to_thread(warm)
+        yield
+
+    app = FastAPI(title="IntentLock control plane", version=SCHEMA_VERSION, lifespan=lifespan)
     origins = os.environ.get("INTENTLOCK_CORS_ORIGINS", "http://localhost:5173").split(",")
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
 

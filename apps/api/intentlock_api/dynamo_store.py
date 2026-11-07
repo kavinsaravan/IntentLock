@@ -15,11 +15,13 @@ Only redacted data is ever written by callers (see intentlock_policy.redact); th
 import random
 import threading
 import time
+from collections import OrderedDict
 from decimal import Decimal
 from typing import Any, Iterable
 
 import boto3
-from boto3.dynamodb.types import TypeSerializer
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from intentlock_policy.models import Event, ImpactReport, MissionContract, ReviewApproval, Run
@@ -27,6 +29,7 @@ from intentlock_policy.models import Event, ImpactReport, MissionContract, Revie
 from .store import ContractExists, ImpactExists, RunExists, StoreError, _iso, now
 
 _ser = TypeSerializer()
+_deser = TypeDeserializer()
 _RUN_ATTRS = set(Run.model_fields)
 _COND_FAIL = "ConditionalCheckFailedException"
 
@@ -35,23 +38,90 @@ def _typed(d: dict[str, Any]) -> dict[str, Any]:
     return {k: _ser.serialize(v) for k, v in d.items()}
 
 
+def _untyped(d: dict[str, Any]) -> dict[str, Any]:
+    return {k: _deser.deserialize(v) for k, v in d.items()}
+
+
+class _Table:
+    """Thin Table-like adapter over ONE shared, thread-safe low-level client.
+
+    Replaces per-thread boto3 *resources* (each thread paid session + TLS setup on its first request, which
+    showed up as ~1.5 s on the first authorization). Same call shapes and results as the Table resource.
+    """
+
+    def __init__(self, client: Any, name: str) -> None:
+        self._c, self._n = client, name
+
+    @staticmethod
+    def _kw(kw: dict[str, Any]) -> dict[str, Any]:
+        out = dict(kw)
+        for k in ("Key", "Item", "ExclusiveStartKey", "ExpressionAttributeValues"):
+            if k in out:
+                out[k] = _typed(out[k])
+        return out
+
+    def put_item(self, **kw: Any) -> Any:
+        return self._c.put_item(TableName=self._n, **self._kw(kw))
+
+    def get_item(self, **kw: Any) -> Any:
+        r = self._c.get_item(TableName=self._n, **self._kw(kw))
+        if "Item" in r:
+            r["Item"] = _untyped(r["Item"])
+        return r
+
+    def update_item(self, **kw: Any) -> Any:
+        r = self._c.update_item(TableName=self._n, **self._kw(kw))
+        if "Attributes" in r:
+            r["Attributes"] = _untyped(r["Attributes"])
+        return r
+
+    def query(self, **kw: Any) -> Any:
+        r = self._c.query(TableName=self._n, **self._kw(kw))
+        r["Items"] = [_untyped(i) for i in r.get("Items", [])]
+        if "LastEvaluatedKey" in r:
+            r["LastEvaluatedKey"] = _untyped(r["LastEvaluatedKey"])
+        return r
+
+
+# DynamoDB rejects a plain write to an item while a transaction (our event append) is in flight on it.
+_CONFLICT_CODES = frozenset({"TransactionConflictException", "ProvisionedThroughputExceededException", "ThrottlingException"})
+
+
+def _retrying(fn: Any, attempts: int = 12) -> Any:
+    """Retry a single-item write on transaction conflicts / throttling with short jittered backoff (bounded)."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in _CONFLICT_CODES and i < attempts - 1:
+                time.sleep(random.uniform(0, 0.015 * (i + 1)))
+                continue
+            raise
+
+
+# Bounded waits: a slow DynamoDB call fails (and authorization fails closed) instead of hanging a worker thread.
+_CLIENT_CONFIG = Config(max_pool_connections=64, connect_timeout=1.5, read_timeout=2.0,
+                        retries={"max_attempts": 2, "mode": "standard"})
+
+
 class DynamoStore:
     def __init__(self, table_name: str, region: str | None = None, endpoint_url: str | None = None) -> None:
         self.table_name = table_name
         self._region, self._endpoint = region, endpoint_url
-        self._local = threading.local()  # boto3 resources are not thread-safe; clients are
-        self._client = boto3.client("dynamodb", region_name=region, endpoint_url=endpoint_url)
+        self._client = boto3.client("dynamodb", region_name=region, endpoint_url=endpoint_url, config=_CLIENT_CONFIG)
+        self._t = _Table(self._client, table_name)
+        self._seq_hint: "OrderedDict[str, int]" = OrderedDict()   # run_id -> last event seq we wrote (saves a read per append)
+        self._hint_lock = threading.Lock()
         self.backend = f"dynamodb:{table_name}@{self._client.meta.region_name}"
 
-    # ---------------------------------------------------------------- helpers
-    @property
-    def _t(self):
-        t = getattr(self._local, "table", None)
-        if t is None:
-            res = boto3.session.Session(region_name=self._region).resource("dynamodb", endpoint_url=self._endpoint)
-            t = self._local.table = res.Table(self.table_name)
-        return t
+    def warm_up(self) -> None:
+        """Open the connection and resolve credentials before the first real request (fire-and-forget at startup)."""
+        try:
+            self._client.get_item(TableName=self.table_name, Key=_typed({"pk": "WARMUP#", "sk": "x"}), ConsistentRead=False)
+        except Exception:
+            pass
 
+    # ---------------------------------------------------------------- helpers
     def _wrap(self, e: ClientError) -> StoreError:
         return StoreError(e.response.get("Error", {}).get("Code", "DynamoDBError"))
 
@@ -126,9 +196,9 @@ class DynamoStore:
         names.update(extra_names or {}); values.update(extra_values or {})
         expr = "SET " + ", ".join(f"#{k} = :{k}" for k in fields)
         try:
-            r = self._t.update_item(Key={"pk": f"RUN#{run_id}", "sk": "META"}, UpdateExpression=expr,
-                                    ConditionExpression=condition, ExpressionAttributeNames=names,
-                                    ExpressionAttributeValues=values, ReturnValues="ALL_NEW")
+            r = _retrying(lambda: self._t.update_item(
+                Key={"pk": f"RUN#{run_id}", "sk": "META"}, UpdateExpression=expr, ConditionExpression=condition,
+                ExpressionAttributeNames=names, ExpressionAttributeValues=values, ReturnValues="ALL_NEW"))
         except ClientError as e:
             if e.response["Error"]["Code"] == _COND_FAIL:
                 return None
@@ -159,9 +229,9 @@ class DynamoStore:
 
     def reserve_tool_call(self, run_id: str) -> int:
         try:
-            r = self._t.update_item(Key={"pk": f"RUN#{run_id}", "sk": "META"},
-                                    UpdateExpression="ADD tool_calls :one", ConditionExpression="attribute_exists(pk)",
-                                    ExpressionAttributeValues={":one": 1}, ReturnValues="UPDATED_NEW")
+            r = _retrying(lambda: self._t.update_item(
+                Key={"pk": f"RUN#{run_id}", "sk": "META"}, UpdateExpression="ADD tool_calls :one",
+                ConditionExpression="attribute_exists(pk)", ExpressionAttributeValues={":one": 1}, ReturnValues="UPDATED_NEW"))
         except ClientError as e:
             raise self._wrap(e) from e
         return int(r["Attributes"]["tool_calls"]) - 1
@@ -170,13 +240,18 @@ class DynamoStore:
     def append_event(self, run_id: str, **fields: Any) -> Event:
         key = {"pk": f"RUN#{run_id}", "sk": "META"}
         for attempt in range(60):
-            cur = self._t.get_item(Key=key, ConsistentRead=True).get("Item")
-            if cur is None:
-                raise StoreError("run not found")
-            prev = int(cur["event_seq"]); seq = prev + 1
+            with self._hint_lock:
+                prev = self._seq_hint.get(run_id)
+            if prev is None:          # no (or stale) hint: read the authoritative counter
+                cur = self._t.get_item(Key=key, ConsistentRead=True).get("Item")
+                if cur is None:
+                    raise StoreError("run not found")
+                prev = int(cur["event_seq"])
+            seq = prev + 1
             ev = Event(event_id=f"evt_{run_id}_{seq:08d}", run_id=run_id, seq=seq, timestamp=now(), **fields)
             item = {"pk": f"RUN#{run_id}", "sk": f"EVT#{seq:012d}", "data": ev.model_dump_json(), "seq": seq}
             try:
+                # The condition `event_seq = :p` keeps this exact even when the hint is stale or another writer raced us.
                 self._client.transact_write_items(TransactItems=[
                     {"Update": {"TableName": self.table_name, "Key": _typed(key),
                                 "UpdateExpression": "SET event_seq = :n",
@@ -185,23 +260,35 @@ class DynamoStore:
                     {"Put": {"TableName": self.table_name, "Item": _typed(item),
                              "ConditionExpression": "attribute_not_exists(pk)"}},
                 ])
+                with self._hint_lock:
+                    self._seq_hint[run_id] = seq
+                    self._seq_hint.move_to_end(run_id)
+                    while len(self._seq_hint) > 512:
+                        self._seq_hint.popitem(last=False)
                 return ev
             except ClientError as e:
                 code = e.response["Error"]["Code"]
                 if code in ("TransactionCanceledException", "TransactionConflictException",
                             "ProvisionedThroughputExceededException"):
+                    with self._hint_lock:
+                        self._seq_hint.pop(run_id, None)     # force an authoritative read on the retry
                     time.sleep(random.uniform(0, 0.01 * (attempt + 1)))  # contention: retry
                     continue
                 raise self._wrap(e) from e
         raise StoreError("event append contention: gave up")
 
-    def update_event(self, run_id: str, seq: int, **fields: Any) -> Event:
+    def update_event(self, run_id: str, seq: int, base: Event | None = None, **fields: Any) -> Event:
+        """Update an event. If the caller already holds the event (`base`), skip the read round trip."""
         key = {"pk": f"RUN#{run_id}", "sk": f"EVT#{seq:012d}"}
         try:
-            it = self._t.get_item(Key=key, ConsistentRead=True).get("Item")
-            if not it:
-                raise StoreError("event not found")
-            ev = Event.model_validate_json(it["data"]).model_copy(update=fields)
+            if base is not None and base.run_id == run_id and base.seq == seq:
+                cur = base
+            else:
+                it = self._t.get_item(Key=key, ConsistentRead=True).get("Item")
+                if not it:
+                    raise StoreError("event not found")
+                cur = Event.model_validate_json(it["data"])
+            ev = cur.model_copy(update=fields)
             self._t.update_item(Key=key, UpdateExpression="SET #d = :d", ConditionExpression="attribute_exists(pk)",
                                 ExpressionAttributeNames={"#d": "data"}, ExpressionAttributeValues={":d": ev.model_dump_json()})
         except ClientError as e:

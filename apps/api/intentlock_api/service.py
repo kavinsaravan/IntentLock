@@ -19,24 +19,28 @@ audit_log = logging.getLogger("intentlock.audit")
 NowFn = Callable[[], datetime]
 
 
+def _expire_with(store, run: Run, contract, now_fn: NowFn) -> Run:
+    """Given an already-loaded run and contract, mark an overdue active run inactive (once, atomically)."""
+    if run.status != "active" or run.started_at is None or contract is None:
+        return run
+    t = now_fn()
+    if (t - run.started_at).total_seconds() >= contract.limits.run_timeout_seconds:
+        won = store.transition_run(run.run_id, ["active"], status="stopped", stopped_at=t, stop_reason="run_timeout")
+        if won is not None:  # exactly one racer records the event
+            store.append_event(run.run_id, event_type="run_stopped", status="recorded",
+                               message="Run time limit reached",
+                               details={"status": "stopped", "cause": "run_timeout",
+                                        "run_timeout_seconds": contract.limits.run_timeout_seconds})
+        return store.get_run(run.run_id) or run
+    return run
+
+
 def expire_if_needed(store, run_id: str, now_fn: NowFn = _now) -> Run | None:
     """Mark an overdue active run inactive (once, atomically) BEFORE anything else reads it."""
     run = store.get_run(run_id)
     if run is None or run.status != "active" or run.started_at is None:
         return run
-    c = store.get_contract(run.contract_id, run.contract_version)
-    if c is None:
-        return run
-    t = now_fn()
-    if (t - run.started_at).total_seconds() >= c.limits.run_timeout_seconds:
-        won = store.transition_run(run_id, ["active"], status="stopped", stopped_at=t, stop_reason="run_timeout")
-        if won is not None:  # exactly one racer records the event
-            store.append_event(run_id, event_type="run_stopped", status="recorded",
-                               message="Run time limit reached",
-                               details={"status": "stopped", "cause": "run_timeout",
-                                        "run_timeout_seconds": c.limits.run_timeout_seconds})
-        return store.get_run(run_id)
-    return run
+    return _expire_with(store, run, store.get_contract(run.contract_id, run.contract_version), now_fn)
 
 
 def stop_run_state(store, run_id: str, status: str, reason: str, now_fn: NowFn = _now) -> Run | None:
@@ -53,8 +57,11 @@ def authorize_request(raw: Any, store, now_fn: NowFn = _now) -> AuthorizationDec
     """Full authoritative authorization of one tool request. Always returns a decision."""
     raw_dict = raw if isinstance(raw, dict) else None
     run_id = raw_dict.get("run_id") if raw_dict else None
-    run = expire_if_needed(store, run_id, now_fn) if isinstance(run_id, str) and run_id else None
+    # Load run and contract ONCE (each DynamoDB round trip is ~75 ms from a laptop); expiry reuses both.
+    run = store.get_run(run_id) if isinstance(run_id, str) and run_id else None
     contract = store.get_contract(run.contract_id, run.contract_version) if run else None
+    if run is not None:
+        run = _expire_with(store, run, contract, now_fn)
     prior = store.reserve_tool_call(run.run_id) if run else 0
     ev = None
     if run is not None and raw_dict is not None:  # event exists BEFORE the decision (FR-4)
@@ -76,7 +83,7 @@ def authorize_request(raw: Any, store, now_fn: NowFn = _now) -> AuthorizationDec
                 message="The run is not active.", evidence={"run_status": fresh.status if fresh else "missing"},
                 stop_run=False, latency_ms=decision.latency_ms)
     if ev is not None and run is not None:
-        store.update_event(run.run_id, ev.seq, status="decided", decision=decision.decision,
+        store.update_event(run.run_id, ev.seq, base=ev, status="decided", decision=decision.decision,
                            reason_code=decision.reason_code, message=decision.message,
                            latency_ms=decision.latency_ms, evidence=decision.evidence)
         if decision.stop_run:

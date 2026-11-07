@@ -163,6 +163,8 @@ def test_runner_exit_sets_terminal_state_when_still_active(store, tmp_path, reap
     wait_until(lambda: client.get(f"/api/runs/{run['run_id']}").json()["status"] == status)
     got = client.get(f"/api/runs/{run['run_id']}").json()
     assert (got["stop_reason"] is None) == (code == 0)
+    # The state flips first; the watcher records its events afterwards (two more round trips on a real table).
+    wait_until(lambda: [e["event_type"] for e in client.get(f"/api/runs/{run['run_id']}/events").json()["events"]].count("run_completed") == 1)
     evs = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
     assert [e["event_type"] for e in evs].count("run_completed") == 1
 
