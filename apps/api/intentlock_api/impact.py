@@ -62,15 +62,26 @@ def reviewers_from_env(env=None) -> set[str] | None:
     return names or None
 
 
+MIN_TOKEN_LEN = 16
+_PLACEHOLDER_MARKERS = ("replace-with", "change-me", "changeme", "example", "password", "secret-token")
+
+
 def reviewer_tokens_from_env(env=None) -> dict[str, str]:
+    """Parse INTENTLOCK_REVIEWER_TOKENS. Fails closed at startup on malformed, weak, placeholder or shared tokens."""
     env = os.environ if env is None else env
     try:
         data = json.loads(env.get("INTENTLOCK_REVIEWER_TOKENS", "{}"))
         if not isinstance(data, dict) or any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in data.items()):
             raise ValueError("invalid reviewer token map")
-        return data
     except (ValueError, TypeError) as e:
         raise ValueError("INTENTLOCK_REVIEWER_TOKENS must be a JSON object of nonempty reviewer names and tokens") from e
+    for name, tok in data.items():
+        if len(tok) < MIN_TOKEN_LEN or any(m in tok.lower() for m in _PLACEHOLDER_MARKERS):
+            raise ValueError(f"reviewer token for {name!r} is too short (<{MIN_TOKEN_LEN}) or looks like a placeholder; "
+                             "generate one with: openssl rand -hex 24")
+    if len(set(data.values())) != len(data):
+        raise ValueError("reviewer tokens must be unique per reviewer (a shared token defeats identity binding)")
+    return data
 
 
 def register(app, store, artifacts, promoter, require_internal: Callable[[str | None], None],
@@ -85,7 +96,8 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
 
     def authorize_reviewer(name: str, supplied_token: str | None) -> None:
         expected = reviewer_tokens.get(name)
-        if not expected or not supplied_token or not hmac.compare_digest(supplied_token, expected):
+        # Compare as bytes: hmac.compare_digest raises TypeError on non-ASCII str, which would surface as a 500.
+        if not expected or not supplied_token or not hmac.compare_digest(supplied_token.encode("utf-8"), expected.encode("utf-8")):
             raise HTTPException(401, "REVIEWER_NOT_AUTHENTICATED")
         if reviewers is not None and name not in reviewers:
             raise HTTPException(403, "REVIEWER_NOT_AUTHORIZED")
