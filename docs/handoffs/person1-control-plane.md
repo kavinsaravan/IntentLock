@@ -8,7 +8,7 @@
 ## 2. Last Updated
 - UTC: 2026-11-07
 - Branch: `Ali-Person-1` (the PRD calls it `person1-control-plane`; actual name is `Ali-Person-1`)
-- Commit: `a66614d` (milestone 1: schemas, policy engine, API; later commits may follow)
+- Commit: `57d3c5c` (milestone 2: dashboard + run expiry; later commits may follow). Milestone 1 was `a66614d`.
 - Schema version: `0.1.0` (PROPOSED — not yet agreed with Person 2)
 
 ## 3. Current Status
@@ -138,7 +138,7 @@ No credentials are stored in the repo.
 - Dashboard: Bedrock-less env shows an error (expected) and offers the fixture path; `Contract` screen keeps the draft only in memory (reload loses it); `/internal/*` is not proxied by Vite (by design); no auth on public API; polling fetches the full event list every 2s (fine for demo size).
 - `intentlock-prd.md` was not added to the repo (shared root file; avoids a conflict with Person 2).
 - Public API has no authentication (hackathon demo).
-- Person 2 branch/handoff unavailable.
+- Person 2 branch/handoff unavailable: the only extra remote branch (`origin/kavinbranch`, checked 2026-11-07) is identical to `main` and has no handoff.
 
 ## 13. Decisions Needed From Person 2
 Accept/modify the 0.1.0 deviations in §8; MCP→authorize transport (HTTP + token as above vs Lambda invoke); who calls `/internal/events` for impact/promotion; AgentCore interceptor payload mapping to ToolRequest; actual branch name.
