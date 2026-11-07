@@ -49,9 +49,8 @@ without `--v3`, its custom agent was not found.
 - No AgentCore/S3 or AWS deployment yet.
 - Read is the only exposed tool. List/search need per-result policy filtering.
 - Polling has 200 ms spacing and 2-second HTTP timeout, so no sub-second SLA claimed.
-- Local process timeout kills the agent and emits an event; API has no execution-plane
-  terminal-state transition endpoint. Agree on a future completed/failed API rather
-  than treating an ingestion event as an authoritative state transition.
+- Local process timeout kills the agent and emits an event. Ali has since added
+  `/internal/runs/{run_id}/state`; connect the runner to it during integration.
 - Trusted regression tests/test command configuration must be outside writable scope.
 - Kiro configuration is not OS containment; review global auto-loaded context before
   claiming all repository access is mediated.
@@ -65,11 +64,10 @@ this branch after review; no control-plane files are included in this commit.
    `packages/contracts`; the three copies under `apps/mcp-server/schemas` are only a
    temporary branch bridge. After integration, replace those copies with canonical
    schema loading and run the cross-workstream tests.
-2. Expose a safe completion/failure state transition for the execution-plane runner.
-   Today `/internal/events` records an agent event but does not change `Run.status`.
-   Preserve the existing rule that stop commits state before reporting success.
-3. Wire the dashboard's launch action to an execution-plane runner using the returned
-   `run_id`, `contract_id`, and `contract_version`. The runner registers its PID through
+2. Ali has added `/internal/runs/{run_id}/state` for completion/failure. Person 2
+   should use it when the runner finishes; preserve stop-before-success ordering.
+3. Ali has wired the dashboard launch action to a runner using the returned
+   `run_id`, `contract_id`, and `contract_version`. Verify the combined flow; the runner registers its PID through
    `/internal/runs/{run_id}/agent`; the UI's stop action uses the existing API endpoint.
 4. Keep `/internal/authorize` as the deterministic authority for each MCP call, with
    `X-IntentLock-Internal-Token`. Keep authorization and event writes serialized or
@@ -82,3 +80,29 @@ this branch after review; no control-plane files are included in this commit.
 
 Person 2's next work is the container sandbox, patch impact analysis, exact promotion,
 and later AgentCore integration. Those are not implemented in this branch yet.
+
+## Immediate handoff for Ali — review safeguards and current Kiro branch
+
+This section supersedes the older "For Ali" action list where Ali has already
+implemented run-state, launch and trusted-test work. The safeguard fix is on
+`codex/ali-review-safeguards` (commit `8026498`), branched from Ali's `a92b199`.
+It changes Ali-owned control-plane files. Keep Person 2 work on `kavinperson2branch`.
+
+1. Review `codex/ali-review-safeguards` against `Ali-Person-1`, then merge it into
+   `Ali-Person-1` after review. It requires a reviewer-specific token for approve,
+   reject and promote, and blocks approval/promotion after a run is stopped.
+2. Set `INTENTLOCK_REVIEWER_TOKENS` locally to a JSON map of reviewer names to
+   private random tokens. Verify a matching reviewer/token pair can approve, and
+   missing, wrong and another reviewer's tokens return 401. The dashboard asks for
+   a token at review time; do not place one in `VITE_*` variables or commit it.
+3. Verify Stop blocks both a fresh approval and promotion after approval. Rerun
+   the impact API tests and dashboard build. The fix branch passed 62 impact API
+   tests and the dashboard build before handoff. An in-flight promotion still
+   requires the execution-plane promoter to recheck run state before applying.
+4. Fetch the latest `kavinperson2branch` and rerun the combined Kiro integration
+   and dashboard launch flow. The older Ali handoff tested an outdated Person 2
+   branch. Real Kiro 3.1 MCP traffic has now been observed on Person 2's machine:
+   one ALLOW for `src/auth/session.ts`, then PROTECTED_PATH for `.env`.
+5. Update `docs/handoffs/person1-control-plane.md` with the current branch name,
+   integration results and remaining limits. Once the safeguard branch is merged,
+   delete that temporary branch if it is no longer needed.
