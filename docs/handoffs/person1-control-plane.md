@@ -8,7 +8,7 @@
 ## 2. Last Updated
 - UTC: 2026-11-07
 - Branch: `Ali-Person-1` (the PRD calls it `person1-control-plane`; actual name is `Ali-Person-1`)
-- Commit: `8064936` (milestone 3: DynamoDB store, Lambda handler, infra; earlier: `57d3c5c` dashboard, `a66614d` foundation)
+- Commit: `c9fbf48` (milestone 4: agent launch, trusted tests, e2e). Earlier: `8064936` DynamoDB/Lambda, `57d3c5c` dashboard, `a66614d` foundation
 - Schema version: `0.1.0` (PROPOSED — not yet agreed with Person 2)
 
 ## 3. Current Status
@@ -197,7 +197,7 @@ Milestone 4 results (2026-11-07), run in the project venv (`.venv`):
 - **SYNTHETIC (stand-in processes, no Kiro, no LLM):** `apps/api/tests/test_launcher.py` (launch argv/env, stop → SIGINT, stubborn runner → SIGINT/SIGTERM/SIGKILL, blocked run terminates runner, exit 0 → completed / 3 → failed, runner-reported state not overwritten, spawn failure → failed + 502) on memory AND moto-mocked DynamoDB.
 - **REAL Person 2 code + SYNTHETIC agent brain:** `INTENTLOCK_PERSON2_CHECKOUT=<checkout of origin/codex/person2-execution-plane@8a93b37> pytest tests/integration` → 4 passed, 1 xpassed (the supervisor-defect test, intermittent), 1 skipped (REAL Kiro test). Chain: API launch endpoint → my launcher → Person 2's real `launch_kiro.py` + supervisor → a `kiro-cli` stand-in that reads the real generated profile and starts Person 2's real MCP server over stdio and sends scripted `tools/call` → my real `/internal/authorize`. Verified: allowed read reaches the file tool (`isError:false`, content withheld from the events); `.env` → `PROTECTED_PATH` (run `blocked`, denied calls returned only the reason code); replay → `RUN_NOT_ACTIVE`; supervisor registered the PID; SSE events identical (seq and event_id) to the list endpoint; clean exit → run `completed`; stop → state committed first, agent AND MCP server processes gone (one observation: 0.12 s; not an SLA); runner "Not logged in" failure → run `failed` with the intended log line.
 - **Dashboard in a real browser** (real API on :8787 + Vite on :5173, Person 2's real runner, synthetic kiro stand-in, `env -i` API process): fixture draft → Approve and launch → Active Run showed launcher RUNNING, agent PID registered by their supervisor, and the allowed MCP read live; Stop → STOPPED, launcher EXITED (code 1 — that run hit the intermittent Person 2 defect above), no agent/MCP processes left, events matched the backend.
-- **Cross-workstream (Person 2's suite on my branch):** see the last run noted at the end of this section.
+- **Cross-workstream (Person 2's own suite on my branch `c9fbf48`, run via a clean worktree with `INTENTLOCK_PERSON1_CHECKOUT`):** `tests/sandbox` → **15 passed** (incl. their 2 real-HTTP MCP→API tests). Full repo run with their checkout available: **238 passed, 2 skipped (real-Kiro test; memory-store secret scan), 1 xpassed**.
 - NOT verified: anything with real Kiro (not installed here; Person 2 reports it is not logged in), safe/unsafe PATCH handling end-to-end (no sandbox/impact/promotion exists yet), real AWS.
 
 ## 12. Known Issues and Blockers
