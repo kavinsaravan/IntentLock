@@ -68,3 +68,22 @@ describe("helpers", () => {
     expect(elapsedSeconds(null, null, 0)).toBeNull();
   });
 });
+
+describe("review API client", () => {
+  it("sends exactly one JSON content-type plus the reviewer token (regression: duplicate Content-Type caused 422)", async () => {
+    const { api } = await import("./api");
+    const seen: RequestInit[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (_u: RequestInfo | URL, init?: RequestInit) => { seen.push(init ?? {}); return new Response("{}", { status: 200 }); }) as typeof fetch;
+    try {
+      await api.review("i1", "approve", { reviewer: "r", patch_sha256: "a".repeat(64), base_commit: "b".repeat(40) }, "tok");
+      await api.promote("i1", { requested_by: "r", patch_sha256: "a".repeat(64) }, "tok");
+    } finally { globalThis.fetch = orig; }
+    for (const init of seen) {
+      const h = new Headers(init.headers as HeadersInit);
+      expect(h.get("content-type")).toBe("application/json");            // not "application/json, application/json"
+      expect(h.get("x-intentlock-reviewer-token")).toBe("tok");
+      expect(JSON.parse(init.body as string)).toBeTypeOf("object");
+    }
+  });
+});

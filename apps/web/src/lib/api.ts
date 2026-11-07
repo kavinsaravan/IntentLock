@@ -11,6 +11,8 @@ export class ApiError extends Error {
   get unavailable(): boolean { return [0, 404, 501, 502, 503].includes(this.status); }
 }
 
+// NOTE: `call` already sets content-type; callers must pass only EXTRA headers. A second differently-cased
+// "Content-Type" would be merged by fetch into "application/json, application/json" and the body would be rejected (422).
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -81,7 +83,7 @@ export const api = {
   },
   review: (id: string, action: "approve" | "reject",
            b: { reviewer: string; patch_sha256: string; base_commit: string }, token: string) =>
-    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, { ...post(b), headers: { "Content-Type": "application/json", "X-IntentLock-Reviewer-Token": token } }),
+    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, { ...post(b), headers: { "X-IntentLock-Reviewer-Token": token } }),
   promote: (id: string, b: { requested_by: string; patch_sha256: string }, token: string) =>
-    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, { ...post(b), headers: { "Content-Type": "application/json", "X-IntentLock-Reviewer-Token": token } }),
+    call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, { ...post(b), headers: { "X-IntentLock-Reviewer-Token": token } }),
 };
