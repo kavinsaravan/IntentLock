@@ -13,8 +13,8 @@ const BLOCKER_TEXT: Record<string, string> = {
   IMPACT_BLOCKED: "TwinGuard blocked this patch", ALREADY_REVIEWED: "a decision was already recorded", NOT_APPROVED: "no approval recorded",
   ALREADY_REQUESTED: "promotion was already requested", PATCH_HASH_MISMATCH: "patch bytes do not match the reported digest",
   PATCH_UNAVAILABLE: "patch artifact unavailable", STALE_BASE_COMMIT: "base commit no longer matches", CONTRACT_NOT_ACTIVE: "the contract was superseded or revoked",
-  RUN_NOT_ELIGIBLE: "the run was blocked or failed", RUN_NOT_FOUND: "run not found", CONTRACT_NOT_FOUND: "contract not found",
-  PROMOTER_NOT_CONFIGURED: "no patch promoter is configured on this backend",
+  RUN_NOT_ELIGIBLE: "the run was stopped, blocked or failed", RUN_NOT_FOUND: "run not found", CONTRACT_NOT_FOUND: "contract not found",
+  PROMOTER_NOT_CONFIGURED: "no patch promoter is configured on this backend", REVIEW_AUTH_NOT_CONFIGURED: "reviewer authentication is not configured",
 };
 const why = (codes: string[]) => codes.map((c) => BLOCKER_TEXT[c] ?? c).join("; ");
 
@@ -27,6 +27,7 @@ export function ImpactReview({ runId }: { runId: string }) {
   const [patch, setPatch] = useState<Load<string>>({ s: "idle" });
   const [status, setStatus] = useState<ImpactStatus | null>(null);
   const [reviewer, setReviewer] = useState("demo-user");
+  const [reviewToken, setReviewToken] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
 
@@ -52,8 +53,8 @@ export function ImpactReview({ runId }: { runId: string }) {
     if (rep.s !== "ok") return;
     const r = rep.v; setBusy(kind); setActionErr(null);
     try {
-      if (kind === "promote") await api.promote(r.impact_report_id, { requested_by: reviewer, patch_sha256: r.patch_sha256 });
-      else await api.review(r.impact_report_id, kind, { reviewer, patch_sha256: r.patch_sha256, base_commit: r.base_commit });
+      if (kind === "promote") await api.promote(r.impact_report_id, { requested_by: reviewer, patch_sha256: r.patch_sha256 }, reviewToken);
+      else await api.review(r.impact_report_id, kind, { reviewer, patch_sha256: r.patch_sha256, base_commit: r.base_commit }, reviewToken);
     } catch (e) {
       setActionErr(e instanceof ApiError ? (e.unavailable ? `${kind} endpoint unavailable (${e.message})` : `${kind} refused by backend: ${e.message}`) : String(e));
     } finally { setBusy(null); await refreshStatus(r.impact_report_id); }
@@ -129,11 +130,12 @@ export function ImpactReview({ runId }: { runId: string }) {
         <Card title="Human review">
           {blocked && <Notice tone="error" title="Blocked by TwinGuard">Blocked patches cannot be approved or promoted (enforced by the backend).</Notice>}
           <label className="field"><span>Reviewer</span><input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={128} /></label>
+          <label className="field"><span>Reviewer token</span><input type="password" autoComplete="off" value={reviewToken} onChange={(e) => setReviewToken(e.target.value)} /></label>
           {status && <p className="muted">Reviewer policy: {status.reviewer_policy}.</p>}
           <div className="row">
-            <button className="btn primary" disabled={!status?.can_approve || patch.s !== "ok" || !reviewer.trim() || busy !== null} onClick={() => act("approve")}>Approve exact patch {shortSha(r.patch_sha256, 8)}</button>
-            <button className="btn" disabled={!!rv || !reviewer.trim() || busy !== null} onClick={() => act("reject")}>Reject</button>
-            <button className="btn" disabled={!status?.can_promote || !reviewer.trim() || busy !== null} onClick={() => act("promote")}>Request promotion</button>
+            <button className="btn primary" disabled={!status?.can_approve || patch.s !== "ok" || !reviewer.trim() || !reviewToken || busy !== null} onClick={() => act("approve")}>Approve exact patch {shortSha(r.patch_sha256, 8)}</button>
+            <button className="btn" disabled={!!rv || !reviewer.trim() || !reviewToken || busy !== null} onClick={() => act("reject")}>Reject</button>
+            <button className="btn" disabled={!status?.can_promote || !reviewer.trim() || !reviewToken || busy !== null} onClick={() => act("promote")}>Request promotion</button>
           </div>
           {status && !status.can_approve && !rv && <p className="muted">Approval unavailable: {why(status.approve_blockers)}.</p>}
           {status && rv?.decision === "approve" && !status.can_promote && !pr && <p className="muted">Promotion unavailable: {why(status.promote_blockers)}.</p>}

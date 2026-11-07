@@ -50,3 +50,15 @@ INTENTLOCK_AWS_TEST_TABLE=<table> AWS_REGION=<region> python3 -m pytest apps/api
 
 ### Read-only checks performed 2026-11-07 (no resources created or changed)
 `sts get-caller-identity` (credentials valid, an IAM *user* principal), `dynamodb list-tables` (0 tables in us-east-1), `cloudformation describe-stacks intentlock-control-plane-dev` (does not exist), `lambda get-function intentlock-authorizer` (does not exist), `lambda get-account-settings` (**ConcurrentExecutions limit = 10**, so reserved concurrency cannot be used meaningfully), `bedrock list-foundation-models --by-provider anthropic` (15 models listed; listing does NOT prove model access is granted — verify with a real invoke before relying on Bedrock). Nothing else was called.
+
+### Human review authentication
+
+Set `INTENTLOCK_REVIEWER_TOKENS` to a JSON object mapping reviewer names to
+random, private tokens. Approval, rejection and promotion requests must send
+`X-IntentLock-Reviewer-Token` for the reviewer named in the body. Missing or wrong
+tokens return 401; an unset mapping fails closed. Enter the token into the Impact
+Review screen at review time. Do not store it in a `VITE_*` variable, commit it,
+or expose these endpoints over plaintext HTTP outside localhost. The existing
+`INTENTLOCK_REVIEWERS` list can further restrict which authenticated reviewers
+may act. A stopped run blocks approval and promotion; an already started promoter
+must separately verify current run state before applying a patch.

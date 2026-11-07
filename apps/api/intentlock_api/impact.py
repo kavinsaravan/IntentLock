@@ -9,6 +9,8 @@ Division of responsibility (security-critical):
     which re-verifies both independently.
 """
 import os
+import hmac
+import json
 import uuid
 from datetime import datetime
 from typing import Any, Callable, Literal
@@ -60,8 +62,20 @@ def reviewers_from_env(env=None) -> set[str] | None:
     return names or None
 
 
+def reviewer_tokens_from_env(env=None) -> dict[str, str]:
+    env = os.environ if env is None else env
+    try:
+        data = json.loads(env.get("INTENTLOCK_REVIEWER_TOKENS", "{}"))
+        if not isinstance(data, dict) or any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in data.items()):
+            raise ValueError("invalid reviewer token map")
+        return data
+    except (ValueError, TypeError) as e:
+        raise ValueError("INTENTLOCK_REVIEWER_TOKENS must be a JSON object of nonempty reviewer names and tokens") from e
+
+
 def register(app, store, artifacts, promoter, require_internal: Callable[[str | None], None],
-             now: Callable[[], datetime], reviewers: set[str] | None) -> None:
+             now: Callable[[], datetime], reviewers: set[str] | None,
+             reviewer_tokens: dict[str, str]) -> None:
     # ------------------------------------------------------------------ helpers
     def report_or_404(impact_id: str) -> ImpactReport:
         r = store.get_impact(impact_id)
@@ -69,8 +83,11 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
             raise HTTPException(404, "IMPACT_REPORT_NOT_FOUND")
         return r
 
-    def authorize_reviewer(name: str) -> None:
-        if reviewers is not None and name not in reviewers:   # None => local-dev: any non-empty identity
+    def authorize_reviewer(name: str, supplied_token: str | None) -> None:
+        expected = reviewer_tokens.get(name)
+        if not expected or not supplied_token or not hmac.compare_digest(supplied_token, expected):
+            raise HTTPException(401, "REVIEWER_NOT_AUTHENTICATED")
+        if reviewers is not None and name not in reviewers:
             raise HTTPException(403, "REVIEWER_NOT_AUTHORIZED")
 
     def patch_blocker(report: ImpactReport) -> str | None:
@@ -89,7 +106,7 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
         if run is None:
             b.append("RUN_NOT_FOUND")
         else:
-            if run.status in ("blocked", "failed"):
+            if run.status in ("blocked", "failed", "stopped"):
                 b.append("RUN_NOT_ELIGIBLE")
             if run.base_commit != report.base_commit:
                 b.append("STALE_BASE_COMMIT")
@@ -107,12 +124,16 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
 
     def approve_blockers(report: ImpactReport) -> list[str]:
         b = common_blockers(report, check_artifact=True)
+        if not reviewer_tokens:
+            b.append("REVIEW_AUTH_NOT_CONFIGURED")
         if store.get_final_review(report.impact_report_id) is not None:
             b.insert(0, "ALREADY_REVIEWED")
         return b
 
     def promote_blockers(report: ImpactReport) -> list[str]:
         b = common_blockers(report, check_artifact=True)
+        if not reviewer_tokens:
+            b.append("REVIEW_AUTH_NOT_CONFIGURED")
         fin = store.get_final_review(report.impact_report_id)
         if fin is None or fin.decision != "approve":
             b.insert(0, "NOT_APPROVED")
@@ -181,15 +202,15 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
             "review": fin.model_dump(mode="json") if fin else None, "promotion": promo,
             "can_approve": not ab, "approve_blockers": ab,
             "can_promote": not pb, "promote_blockers": pb,
-            "reviewer_policy": "allowlist" if reviewers is not None else "any-identity (local dev; self-asserted)",
+            "reviewer_policy": "authenticated reviewer" if reviewers is None else "authenticated allowlist",
             "promoter_configured": promoter is not None,
             "artifact_reader": getattr(artifacts, "label", None),
         }
 
     # ------------------------------------------------------------------ review
-    def decide(impact_id: str, decision: Literal["approve", "reject"], body: ReviewBody) -> dict:
+    def decide(impact_id: str, decision: Literal["approve", "reject"], body: ReviewBody, reviewer_token: str | None) -> dict:
         report = report_or_404(impact_id)
-        authorize_reviewer(body.reviewer)
+        authorize_reviewer(body.reviewer, reviewer_token)
         if body.patch_sha256 != report.patch_sha256:
             raise HTTPException(409, "PATCH_HASH_MISMATCH")
         if body.base_commit != report.base_commit:
@@ -223,19 +244,19 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
         return {"review": stored.model_dump(mode="json"), "created": True}
 
     @app.post("/api/impact/{impact_id}/approve")
-    def approve(impact_id: str, body: ReviewBody) -> dict:
-        return decide(impact_id, "approve", body)
+    def approve(impact_id: str, body: ReviewBody, x_intentlock_reviewer_token: str | None = Header(default=None)) -> dict:
+        return decide(impact_id, "approve", body, x_intentlock_reviewer_token)
 
     @app.post("/api/impact/{impact_id}/reject")
-    def reject(impact_id: str, body: ReviewBody) -> dict:
-        return decide(impact_id, "reject", body)
+    def reject(impact_id: str, body: ReviewBody, x_intentlock_reviewer_token: str | None = Header(default=None)) -> dict:
+        return decide(impact_id, "reject", body, x_intentlock_reviewer_token)
 
     # --------------------------------------------------------------- promotion
     @app.post("/api/impact/{impact_id}/promote")
-    def promote(impact_id: str, body: PromoteBody) -> dict:
+    def promote(impact_id: str, body: PromoteBody, x_intentlock_reviewer_token: str | None = Header(default=None)) -> dict:
         """Request promotion of the approved patch. The promoter (execution plane) does the real work."""
         report = report_or_404(impact_id)
-        authorize_reviewer(body.requested_by)
+        authorize_reviewer(body.requested_by, x_intentlock_reviewer_token)
         fin = store.get_final_review(impact_id)
         if fin is None or fin.decision != "approve":
             raise HTTPException(409, "NOT_APPROVED")
