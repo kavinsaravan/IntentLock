@@ -208,3 +208,55 @@ def test_latency_is_measured_and_small(client):
     c = activate(client); run = start_run(client, c)
     d = authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"})).json()
     assert 0 <= d["latency_ms"] < 250
+
+
+# ---- expiry marks the run inactive BEFORE denying -----------------------
+def test_expired_run_is_marked_inactive_before_denial(client, monkeypatch):
+    import datetime
+    import intentlock_api.app as appmod
+    dr = draft(); dr["limits"]["run_timeout_seconds"] = 60
+    c = activate(client, dr); run = start_run(client, c)
+    real = appmod.now
+    monkeypatch.setattr(appmod, "now", lambda: real() + datetime.timedelta(seconds=61))
+    # even a request that would also fail argument validation reports the inactive run
+    d = authz(client, req(run, c, "read_file", {"path": "../x"})).json()
+    assert (d["decision"], d["reason_code"]) == ("deny", "RUN_NOT_ACTIVE")
+    assert d["evidence"]["run_status"] == "stopped"
+    got = client.get(f"/api/runs/{run['run_id']}").json()
+    assert got["status"] == "stopped" and got["stop_reason"] == "run_timeout" and got["stopped_at"]
+    evs = client.get(f"/api/runs/{run['run_id']}/events").json()["events"]
+    assert [e["event_type"] for e in evs].count("run_stopped") == 1
+
+
+def test_expiry_visible_on_plain_get(client, monkeypatch):
+    import datetime
+    import intentlock_api.app as appmod
+    dr = draft(); dr["limits"]["run_timeout_seconds"] = 60
+    c = activate(client, dr); run = start_run(client, c)
+    real = appmod.now
+    monkeypatch.setattr(appmod, "now", lambda: real() + datetime.timedelta(seconds=61))
+    assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "stopped"
+
+
+def test_sse_resumes_from_last_event_id_header(client):
+    c = activate(client); run = start_run(client, c)
+    authz(client, req(run, c, "read_file", {"path": "src/auth/a.ts"}, "ra"))
+    authz(client, req(run, c, "read_file", {"path": "src/auth/b.ts"}, "rb"))
+    with client.stream("GET", f"/api/runs/{run['run_id']}/events/stream?timeout_seconds=0.5",
+                       headers={"Last-Event-ID": "2"}) as r:
+        text = "".join(r.iter_text())
+    assert "\"request_id\":\"rb\"" in text and "\"request_id\":\"ra\"" not in text
+    assert "event: run_started" not in text
+
+
+def test_request_permission_and_finish_task_are_conditional(client):
+    dr = draft(); dr["limits"]["max_tool_calls"] = 2
+    c = activate(client, dr); run = start_run(client, c)
+    ok = authz(client, req(run, c, "finish_task", {"summary": "x"}, "f1")).json()
+    assert ok["decision"] == "allow"
+    bad = authz(client, req(run, c, "request_permission", {"tool": "t"}, "p1")).json()
+    assert bad["reason_code"] == "INVALID_ARGUMENTS"          # argument validation applies
+    lim = authz(client, req(run, c, "finish_task", {"summary": "x"}, "f2")).json()
+    assert lim["reason_code"] == "TOOL_CALL_LIMIT_EXCEEDED"   # limits apply (denied calls count)
+    client.post(f"/api/runs/{run['run_id']}/stop")
+    assert authz(client, req(run, c, "finish_task", {"summary": "x"}, "f3")).json()["reason_code"] == "RUN_NOT_ACTIVE"

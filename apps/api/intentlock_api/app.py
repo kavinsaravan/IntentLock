@@ -82,8 +82,26 @@ def create_app(store: LocalMemoryStore | None = None,
         if not x_intentlock_internal_token or not hmac.compare_digest(x_intentlock_internal_token, token):
             raise HTTPException(401, "INVALID_INTERNAL_TOKEN")
 
+    def expire_if_needed(run_id: str) -> Run | None:
+        """Mark an overdue active run inactive (and record why) BEFORE anything else
+        looks at it, so state and denials agree. No background reaper: lazy on access."""
+        with store.lock:
+            run = store.get_run(run_id)
+            if run is None or run.status != "active" or run.started_at is None:
+                return run
+            c = store.get_contract(run.contract_id, run.contract_version)
+            if c is None:
+                return run
+            if (now() - run.started_at).total_seconds() >= c.limits.run_timeout_seconds:
+                run = store.update_run(run_id, status="stopped", stopped_at=now(), stop_reason="run_timeout")
+                store.append_event(run_id, event_type="run_stopped", status="recorded",
+                                   message="Run time limit reached",
+                                   details={"status": "stopped", "cause": "run_timeout",
+                                            "run_timeout_seconds": c.limits.run_timeout_seconds})
+            return run
+
     def get_run_or_404(run_id: str) -> Run:
-        r = store.get_run(run_id)
+        r = expire_if_needed(run_id)
         if not r:
             raise HTTPException(404, "RUN_NOT_FOUND")
         return r
@@ -179,12 +197,17 @@ def create_app(store: LocalMemoryStore | None = None,
 
     @app.get("/api/runs/{run_id}/events/stream")
     async def stream_events(run_id: str, after_seq: int = Query(0, ge=0),
-                            timeout_seconds: float = Query(300, gt=0, le=3600)):
+                            timeout_seconds: float = Query(300, gt=0, le=3600),
+                            last_event_id: str | None = Header(default=None)):
         get_run_or_404(run_id)
+        resume = after_seq
+        if last_event_id and last_event_id.isdigit():  # browser EventSource reconnect
+            resume = max(resume, int(last_event_id))
 
         async def gen():
-            last, waited = after_seq, 0.0
+            last, waited = resume, 0.0
             while waited < timeout_seconds:
+                expire_if_needed(run_id)
                 for e in store.list_events(run_id, last):
                     last = e.seq
                     yield f"id: {e.seq}\nevent: {e.event_type}\ndata: {e.model_dump_json()}\n\n"
@@ -203,7 +226,7 @@ def create_app(store: LocalMemoryStore | None = None,
         raw = body if isinstance(body, dict) else None
         run_id = raw.get("run_id") if raw else None
         with store.lock:  # serialises call counting + stop transition (single process)
-            run = store.get_run(run_id) if isinstance(run_id, str) else None
+            run = expire_if_needed(run_id) if isinstance(run_id, str) else None
             contract = store.get_contract(run.contract_id, run.contract_version) if run else None
             prior = store.count_tool_requests(run.run_id) if run else 0
             ev = None

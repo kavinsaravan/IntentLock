@@ -259,3 +259,14 @@ def test_decisions_are_deterministic(make_req, run, contract):
     a, b = run_auth(req, run, contract), run_auth(req, run, contract)
     strip = lambda d: {**d.model_dump(), "latency_ms": 0}
     assert strip(a) == strip(b)
+
+
+def test_always_allowed_tools_obey_run_state_limits_and_args(make_req, run, contract):
+    for tool, args in (("finish_task", {"summary": "done"}),
+                       ("request_permission", {"tool": "read_file", "resource": ".env", "reason": "r"})):
+        assert run_auth(make_req(tool, args), run, contract).decision == "allow"
+        assert run_auth(make_req(tool, args), run.model_copy(update={"status": "stopped"}), contract).reason_code == "RUN_NOT_ACTIVE"
+        assert run_auth(make_req(tool, args), run, contract.model_copy(update={"status": "revoked"})).reason_code == "CONTRACT_NOT_ACTIVE"
+        assert run_auth(make_req(tool, args, contract_version=9), run, contract).reason_code == "CONTRACT_VERSION_MISMATCH"
+        assert run_auth(make_req(tool, args), run, contract, prior=50).reason_code == "TOOL_CALL_LIMIT_EXCEEDED"
+        assert run_auth(make_req(tool, {**args, "extra": 1}), run, contract).reason_code == "INVALID_ARGUMENTS"
