@@ -12,7 +12,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from intentlock_policy.models import Event, MissionContract, ReviewApproval, Run
+from intentlock_policy.models import Event, ImpactReport, MissionContract, ReviewApproval, Run
 
 
 def now() -> datetime:
@@ -25,6 +25,10 @@ class ContractExists(Exception):
 
 class RunExists(Exception):
     pass
+
+
+class ImpactExists(Exception):
+    """An impact report id already exists; reports are immutable."""
 
 
 class StoreError(Exception):
@@ -48,6 +52,9 @@ class LocalMemoryStore:
         self._tool_calls: dict[str, int] = {}
         self._events: dict[str, list[Event]] = {}
         self._reviews: dict[str, list[ReviewApproval]] = {}
+        self._impacts: dict[str, ImpactReport] = {}
+        self._final_reviews: dict[str, ReviewApproval] = {}
+        self._promotions: dict[str, dict[str, Any]] = {}
 
     # ---- contracts (content immutable; only `status` may change) ----
     def put_contract(self, c: MissionContract) -> None:
@@ -141,6 +148,51 @@ class LocalMemoryStore:
     def list_reviews(self, impact_report_id: str) -> list[ReviewApproval]:
         with self._lock:
             return sorted(self._reviews.get(impact_report_id, []), key=lambda r: (r.reviewed_at, r.review_id))
+
+    # ---- impact reports (immutable), ONE final review per report, promotion records ----
+    def put_impact(self, r: ImpactReport) -> None:
+        with self._lock:
+            if r.impact_report_id in self._impacts:
+                raise ImpactExists(r.impact_report_id)
+            self._impacts[r.impact_report_id] = r
+
+    def get_impact(self, impact_report_id: str) -> ImpactReport | None:
+        with self._lock:
+            return self._impacts.get(impact_report_id)
+
+    def put_final_review(self, r: ReviewApproval) -> tuple[ReviewApproval, bool]:
+        """Atomic first-decision-wins. Returns (stored review, created?)."""
+        with self._lock:
+            cur = self._final_reviews.get(r.impact_report_id)
+            if cur is not None:
+                return cur, False
+            self._final_reviews[r.impact_report_id] = r
+            self.put_review(r)
+            return r, True
+
+    def get_final_review(self, impact_report_id: str) -> ReviewApproval | None:
+        with self._lock:
+            return self._final_reviews.get(impact_report_id)
+
+    def put_promotion(self, rec: dict[str, Any]) -> bool:
+        with self._lock:
+            if rec["impact_report_id"] in self._promotions:
+                return False
+            self._promotions[rec["impact_report_id"]] = dict(rec)
+            return True
+
+    def get_promotion(self, impact_report_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            p = self._promotions.get(impact_report_id)
+            return dict(p) if p else None
+
+    def transition_promotion(self, impact_report_id: str, from_statuses: Iterable[str], **fields: Any) -> dict[str, Any] | None:
+        with self._lock:
+            p = self._promotions.get(impact_report_id)
+            if p is None or p["status"] not in set(from_statuses):
+                return None
+            p.update(fields)
+            return dict(p)
 
 
 def create_store_from_env(env: dict[str, str] | None = None):

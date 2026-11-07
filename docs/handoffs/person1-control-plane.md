@@ -24,10 +24,10 @@
 | Bedrock contract proposal | Implemented but untested against real AWS (fake-invoker tests only; `boto3` now installed locally, no model configured) |
 | CloudWatch | Lambda logs go to a CloudWatch log group once deployed; custom metrics NOT implemented |
 | React dashboard (5 screens) | Tested locally (manual browser run; unit tests for pure logic) |
-| Impact/approve/promote UI | Only exercised against a throwaway stub; backend endpoints do not exist |
+| TwinGuard-facing API + review/promotion UI | Tested locally (API: 40 tests on memory + mocked DynamoDB; UI: manual browser run against the real endpoints). **Impact reports, patches and the promoter are SIMULATED** (fixtures / fake promoter) because Person 2 has not built TwinGuard or the patch promoter |
 | Agent launch from dashboard (control-plane side) | Tested locally: `POST /api/runs/{id}/launch` starts a CONFIGURED runner subprocess; verified in the browser against Person 2's real `launch_kiro.py` supervisor with a SYNTHETIC kiro stand-in. **Never run with real Kiro (not installed/logged in here)** |
 | Trusted-test protection (authorization layer) | Tested locally (17 tests + shared vectors). TwinGuard side NOT implemented (Person 2) |
-| Execution-plane integration | Tested locally: Person 2's `tests/sandbox` (15) pass against this branch; my `tests/integration` (4 pass, 1 xfail-tolerant, 1 real-Kiro test skipped) drive their real runner/MCP server. **No real Kiro/model traffic has occurred** |
+| Execution-plane integration | **Reconciled with `origin/kavinperson2branch@3847418`** (only code change: `--v3` in `launch_kiro.py`; schema copies byte-identical to `packages/contracts`). Person 2's suite passes against this branch. Person 2 independently reported REAL authenticated Kiro 3.1 traffic against commit `1bfd0ff` (verified by them, not by me). **Dashboard→real Kiro has NOT been run** (Kiro not installed/authenticated on this machine); procedure for Kavin's machine: `tests/integration/README.md` |
 
 ## 4. Completed Features
 - **Canonical schemas** — `packages/contracts/schemas/*.schema.json`, fixtures in `packages/contracts/fixtures/`, models in `packages/policy-engine/intentlock_policy/models.py`. Tested locally.
@@ -62,6 +62,16 @@ Behaviour: header shows real `/health` (API connected / store label / schema ver
 - **Trusted tests** (`engine.py: _check_trusted_tests`, deterministic, `propose_patch` only; reads stay allowed): a patch is denied `PATH_NOT_ALLOWED` with `evidence.rule="TRUSTED_TEST_READ_ONLY"` (no stop-run) if it creates/modifies/deletes/renames any path matching `tests/**`, `test/**`, `__tests__/**`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `*.test.*`, `*.spec.*`, `jest.config.*`, `vitest.config.*`, `.mocharc*`, `jest.setup.*`, `setupTests.*` (case-insensitive), any repo-relative file named in an approved test's argv, or `package.json` entries that change `scripts`, lifecycle scripts (`install/preinstall/postinstall/prepare/…`), anything starting `test`, or the script name(s) referenced by approved argv (`npm|pnpm|yarn run X`, plus `preX/postX`); plus any create/delete/rename of `package.json`. It overrides the contract's `allowed_paths` (the PRD example allows `tests/auth/**`; that now only permits READING). Protected-path precedence is unchanged. No schema change: uses existing reason code + free-form `evidence`. Shared test vectors: `packages/contracts/fixtures/patch-vectors/trusted-tests.json`.
 - **Environment:** project venv `.venv` (gitignored) with `apps/api/requirements.txt` / `requirements-dev.txt`; `apps/api/.env.example` lists all variables.
 
+### Milestone 5 — TwinGuard-facing API (2026-11-07)
+New modules `apps/api/intentlock_api/{impact,artifacts,promoter}.py`; store methods `put_impact/get_impact`, `put_final_review/get_final_review` (atomic first-decision-wins), `put_promotion/get_promotion/transition_promotion` on both stores (DynamoDB keys `IMPACT#id/REPORT`, `REVIEW#id/FINAL`, `PROMO#id/STATE`). **The backend, not the frontend, enforces everything below.** Endpoint schemas are PROPOSED for Person 2 (see §9) and not frozen until they agree; no shared schema was changed.
+- `POST /internal/impact` (token): execution plane submits an `ImpactReport` (shared schema 0.1.0, strict). Run must exist; `contract_id/version` must match the run (`409 IMPACT_MISMATCH`); `base_commit` must equal the run's (`409 STALE_BASE_COMMIT`); immutable (re-submit identical → 200 idempotent, different → `409 IMPACT_EXISTS`); records an `impact_report` event. **Never triggers promotion.**
+- `GET /api/impact/{id}` → the report. `GET /api/impact/{id}/patch` → the exact artifact bytes (`text/plain`, `X-Patch-SHA256`), served ONLY if SHA-256(bytes) == `patch_sha256` (`409 PATCH_HASH_MISMATCH` otherwise, `404 PATCH_UNAVAILABLE` if missing/unreadable). Artifacts are read via `INTENTLOCK_ARTIFACT_DIR` (LOCAL DEV stand-in for the S3 layout `runs/{run_id}/patches/{sha256}.patch`; path traversal/symlink escape rejected; an S3 reader is NOT implemented).
+- `GET /api/impact/{id}/status` → `{decision, review, promotion, can_approve, approve_blockers[], can_promote, promote_blockers[], reviewer_policy, promoter_configured, artifact_reader}` — the UI renders this; it never decides.
+- `POST /api/impact/{id}/approve|reject` body `{reviewer, patch_sha256, base_commit, comment?}`. Approve is refused (409, code as `detail`) when: `IMPACT_BLOCKED` (a blocked patch is NEVER approvable), `ALREADY_REVIEWED`, `RUN_NOT_ELIGIBLE` (run `blocked`/`failed`), `STALE_BASE_COMMIT`, `CONTRACT_NOT_ACTIVE` (superseded/revoked), `PATCH_HASH_MISMATCH`/`PATCH_UNAVAILABLE` (the artifact is re-read and re-hashed at approval time), or body digest/base commit differ from the report. `403 REVIEWER_NOT_AUTHORIZED` when `INTENTLOCK_REVIEWERS` (comma list) is set and the reviewer is not on it; with no allowlist any non-empty identity is accepted (LOCAL DEV, self-asserted — the public API has no real authentication). Exactly one decision per report (atomic); same reviewer repeating is idempotent; a different decision/reviewer → `409 ALREADY_REVIEWED`. The record is a shared-schema `ReviewApproval` (reviewer, `contract_version`, `base_commit`, `patch_sha256`, timestamp) + a `review_decision` event. Reject is allowed even for blocked reports.
+- `POST /api/impact/{id}/promote` body `{requested_by, patch_sha256}`: requires an `approve` review; digest must equal the approved one; re-checks contract/run/base-commit/artifact hash; at most one request per report (atomic, `409 ALREADY_REQUESTED`); `503 PROMOTER_NOT_CONFIGURED` (no record created) if `INTENTLOCK_PROMOTER_URL`/`INTENTLOCK_PROMOTER_TOKEN` are unset. It then calls Person 2's promoter (`POST {url}/promote`, header `X-IntentLock-Promoter-Token`, no redirects, https unless localhost) with the approved identity/digest/base commit and records the outcome: `promoted`, `refused` (+reason code), or `failed` (`PROMOTER_UNAVAILABLE`). If the promoter claims success for a different digest/base commit the record is `failed` `PATCH_HASH_MISMATCH` (never reported as success). Records a `promotion` event. **This code never applies a patch; only the promoter does, and it must re-verify.**
+- Event sanitizer now preserves values under digest keys (`patch_sha256`, `applied_patch_sha256`, `base_commit`, `sha256`, `commit`, `resulting_commit`) only when exactly 40/64 lowercase hex; all other long tokens are still redacted.
+- Dashboard: the Impact screen's Approve/Reject/Request-promotion buttons are driven by `/status` (`can_approve`, `can_promote`, blocker explanations); it shows the recorded review and promotion; the Final Audit shows review + promotion records and exports them.
+
 ## 5. Current Implementation Work
 Dashboard is functional against the local API. Next per instruction: integrate Person 2's MCP traffic, then DynamoDB, Lambda, CloudWatch, real Bedrock verification. Nothing half-finished in the tree.
 
@@ -71,6 +81,8 @@ Dashboard is functional against the local API. Next per instruction: integrate P
 Milestone 3: `apps/api/intentlock_api/{store,dynamo_store,service,lambda_handler,app}.py` (store refactor, new modules), `apps/api/tests/{conftest,test_store_contract,test_lambda_handler,test_api}.py`, `infrastructure/control-plane/{template.yaml,build_lambda.sh,README.md}`, `.gitignore` (`infrastructure/control-plane/build/`), this handoff.
 
 Milestone 4: `apps/api/intentlock_api/{launcher,app}.py`, `apps/api/tests/test_launcher.py`, `apps/api/requirements*.txt`, `apps/api/.env.example`, `packages/policy-engine/intentlock_policy/engine.py`, `tests/policy/test_trusted_tests.py`, `packages/contracts/fixtures/patch-vectors/trusted-tests.json` (shared dir, proposed), `tests/integration/test_agent_launch_e2e.py`, `apps/web/src/{lib/api.ts,lib/types.ts,screens/ActiveRun.tsx,screens/ReviewContract.tsx}`, `AGENTS.md` (venv guidance), `.gitignore`.
+
+Milestone 5: `apps/api/intentlock_api/{impact,artifacts,promoter,store,dynamo_store,app}.py`, `packages/policy-engine/intentlock_policy/redact.py`, `apps/api/tests/{test_impact_api,test_store_contract}.py`, `tests/policy/test_policy.py`, `apps/web/src/{lib/api.ts,lib/types.ts,screens/ImpactReview.tsx,screens/FinalAudit.tsx}`, `tests/integration/README.md`, `infrastructure/control-plane/README.md`.
 
 ## 7. API Endpoints
 Base URL (local): `http://127.0.0.1:8787` — start: `cd apps/api && PYTHONPATH=../../packages/policy-engine:. INTENTLOCK_INTERNAL_TOKEN=<token> python3 -m uvicorn intentlock_api.app:create_app --factory --port 8787`
@@ -107,6 +119,8 @@ curl -XPOST $BASE/internal/authorize -H "X-IntentLock-Internal-Token: $T" -H 'co
 
 Added in milestone 3 (internal, token required): `POST /internal/runs/{run_id}/state` body `{"status":"completed"|"failed","reason"?}` → `{run, transitioned}`. Atomic active/created → terminal; first writer wins (a stopped/blocked run is NOT overwritten and returns `transitioned:false`); records one `run_completed` event. This is the authoritative completion path for the execution plane (events alone never change `Run.status`).
 Changed behaviour: `/internal/authorize` no longer relies on a process-local lock; correctness comes from the store's atomic operations. Event IDs are now deterministic (`evt_{run_id}_{seq:08d}`); schema unchanged.
+
+Milestone 5 endpoints (impact/review/promotion) are documented in §4 (Milestone 5). Internal: `POST /internal/impact`. Unchanged and compatible with Person 2: `/internal/authorize`, `/internal/runs/{id}/agent`, `/internal/runs/{id}/state`, `/internal/events`.
 
 ## 8. Shared Schemas (0.1.0, proposed)
 Types: MissionContract, MissionContractDraft, ToolRequest, AuthorizationDecision, Run, Event, ImpactReport, ReviewApproval. JSON Schemas and fixtures in `packages/contracts/`. All strict (no extra fields). Deviations/additions vs PRD that Person 2 must accept or reject:
@@ -162,6 +176,26 @@ Read from `origin/codex/person2-execution-plane@8a93b37` (unchanged since last c
 
 **Do not edit** `packages/contracts/schemas/*` or the policy engine; propose changes in your handoff instead.
 
+### Milestone 5 — reconciliation with `origin/kavinperson2branch@3847418` and TwinGuard contract (read this)
+**Compatibility verified (read-only, no files of theirs modified):** their three schema copies (`tool-request`, `authorization-decision`, `run`) are byte-identical (parsed-JSON equal) to `packages/contracts/schemas` 0.1.0; the MCP→`/internal/authorize` and `/internal/runs/{id}/agent` HTTP usage matches this API; their only change since `8a93b37` is `--v3` in `launch_kiro.py` (Kiro V3 profile loading); their suite (15 tests) passes against this branch; my launch e2e passes against their branch. Their handoff predates my milestones 3–5 and still lists "no completion endpoint": **it exists.**
+**Completion endpoint for the runner (`POST /internal/runs/{run_id}/state`, header `X-IntentLock-Internal-Token`):** body `{"status":"completed"|"failed","reason"?:str<=200}` → `{"run":Run,"transitioned":bool}`. Atomic active→terminal, first writer wins (a run already `stopped`/`blocked`/`completed` is NOT overwritten; `transitioned:false`), records one `run_completed` event, afterwards `/internal/authorize` returns `RUN_NOT_ACTIVE`. Suggested use in their `control_plane.Client`: call after the agent process exits (`completed` on exit 0, else `failed`). If they do not, the control plane's launcher watcher infers it for runs it launched.
+**TwinGuard contract (PROPOSED, please confirm or counter-propose; I will not freeze it without you):**
+1. Submit each result: `POST /internal/impact` with an `ImpactReport` (shared schema `impact-report` 0.1.0; `decision` ∈ `block|review_required|pass`; `contract_id/contract_version/base_commit` must equal the run's; `patch_sha256` = SHA-256 of the patch bytes you stored).
+2. Store the exact patch bytes at `patch_s3_key` (PRD layout `runs/{run_id}/patches/{sha256}.patch`). Local dev: write under the directory the control plane is given as `INTENTLOCK_ARTIFACT_DIR`. The control plane re-hashes before serving or approving.
+3. Promoter: implement `POST /promote` (header `X-IntentLock-Promoter-Token`, localhost http or https) accepting `{impact_report_id, run_id, contract_id, contract_version, base_commit, patch_sha256, patch_s3_key, review:{review_id, reviewer, reviewed_at, decision:"approve"}}` and returning `{status:"promoted", base_commit, applied_patch_sha256}` or `{status:"refused", reason_code, message?}`. The promoter MUST independently verify: repository HEAD == `base_commit` (else refuse `STALE_BASE_COMMIT`), SHA-256 of the artifact == `patch_sha256` (else `PATCH_HASH_MISMATCH`), `git apply --check` before applying, and apply ONLY that artifact; it must never re-run the agent action. The control plane's approval is a precondition, not a substitute for these checks. Reply bodies are strict (extra fields rejected); `applied_patch_sha256`/`base_commit` must echo the approved values.
+4. Trusted tests/`TRUSTED_TEST_MODIFIED`: unchanged from milestone 4 (§9 above). Authorization layer (done): deterministic `PATH_NOT_ALLOWED`/`TRUSTED_TEST_READ_ONLY` for test paths, test configs, `package.json` test/lifecycle script keys, approved-test script names and files named in approved argv (`packages/contracts/fixtures/patch-vectors/trusted-tests.json`). TwinGuard side (yours, NOT done): run approved tests from the base-commit baseline; block with finding code `TRUSTED_TEST_MODIFIED` if any trusted path/script changes in the sandbox result. Please confirm the finding code and the pattern list.
+
+**Person 2 issue tracker (none of their files touched):**
+| # | Item | Status |
+|---|---|---|
+| 1 | Intermittent macOS `os.killpg(SIGKILL)` `PermissionError` in `lifecycle.terminate_group` | OPEN (reproduced once in a manual dashboard stop; `test_supervisor_exits_cleanly_...` is xfail-tolerant) |
+| 2 | Runner only cleans up on SIGINT; no SIGTERM handler | OPEN (my watcher escalates SIGINT→SIGTERM→SIGKILL) |
+| 3 | `--prompt={mission}` from the control plane used as the Kiro prompt | UNCONFIRMED (their default `--prompt` is a synthetic string; my launcher always passes the mission) |
+| 4 | Completion/failure via `/internal/runs/{id}/state` | endpoint READY on my side; their client does not call it yet |
+| 5 | Kiro built-in file/shell tools cannot bypass the MCP gateway | UNVERIFIED (profile lists only `@intentlock/read_file` and denies builtin capabilities; no interactive tool-exposure inspection recorded). Do NOT claim all Kiro access is mediated. Inspection checklist: `tests/integration/README.md` |
+| 6 | Only `read_file` exposed; list/search/propose_patch/run_approved_test pending | OPEN (list/search need per-result protected filtering) |
+| 7 | TwinGuard sandbox, impact analyzer, patch promoter | NOT IMPLEMENTED (contract above is waiting on them) |
+
 ## 10. AWS Configuration
 | Service | State |
 |---|---|
@@ -200,25 +234,34 @@ Milestone 4 results (2026-11-07), run in the project venv (`.venv`):
 - **Cross-workstream (Person 2's own suite on my branch `c9fbf48`, run via a clean worktree with `INTENTLOCK_PERSON1_CHECKOUT`):** `tests/sandbox` → **15 passed** (incl. their 2 real-HTTP MCP→API tests). Full repo run with their checkout available: **238 passed, 2 skipped (real-Kiro test; memory-store secret scan), 1 xpassed**.
 - NOT verified: anything with real Kiro (not installed here; Person 2 reports it is not logged in), safe/unsafe PATCH handling end-to-end (no sandbox/impact/promotion exists yet), real AWS.
 
+Milestone 5 results (2026-11-07), project venv:
+- Per suite: contract 29 passed; policy 84 passed; API+store+Lambda+launcher+impact 182 passed / 1 skipped (memory-store secret scan). Each store-level test and each `client`/`env`-fixture API test runs on memory AND moto-mocked DynamoDB. Frontend: `tsc --noEmit` clean, 8 vitest, `vite build` OK. `cfn-lint` on the template clean.
+- **Person 2's suite on this branch** (`origin/kavinperson2branch@3847418` checked out read-only in a worktree, `INTENTLOCK_PERSON1_CHECKOUT` = clean checkout of this branch): 15 passed. **My launch e2e against their branch:** 4 passed, 1 xpassed, 1 skipped (real Kiro).
+- **Impact/review/promotion (SIMULATED data):** 40 API tests (reports are fixtures; patch artifacts are files written by the test; promoter is a fake that records calls, plus a real localhost HTTP server for the client). Proven: blocked is never approvable (UI disabled AND a direct backend call returns `409 IMPACT_BLOCKED`); wrong digest/base commit refused; reviewer allowlist enforced (403); one atomic decision per report; approval needs a verified artifact, active contract, eligible run; tampered/missing artifact never served/approved/promoted; `pass` never promotes (promoter call count 0 until `/promote`); promotion requires approval + exact digest; at most one promotion request; promoter refusal/outage/mismatched-claim recorded honestly; events/DynamoDB items contain no patch text; redirects/malformed promoter replies/remote plaintext http rejected.
+- **Manual browser run (real API + real endpoints; SIMULATED impact reports and a SIMULATED promoter stub):** blocked report → buttons disabled with reason, direct approve call refused 409; passing report → Approve → review recorded (reviewer, contract v1, base, digest) → Request promotion → PROMOTED; Final Audit showed the review and promotion records.
+- **Real Kiro:** NOT run by me (Kiro not installed here). Person 2's own report of real Kiro traffic is against commit `1bfd0ff`.
+- **AWS (read-only, us-east-1):** see `infrastructure/control-plane/README.md`. Nothing created.
+
 ## 12. Known Issues and Blockers
-- **No real Kiro/model traffic has ever run.** Kiro CLI is not installed on this machine and Person 2 reports theirs is not logged in. The opt-in test `test_REAL_kiro_cli_traffic` (needs `INTENTLOCK_REAL_KIRO=1`, `kiro-cli` on PATH, logged in) is written but has NOT been run.
-- **No safe/unsafe patch end-to-end:** Person 2 has not implemented the sandbox, impact analysis or promotion. Only the authorization-layer rules (trusted tests, protected/allowed paths) are tested, with vectors ready for TwinGuard.
-- Person 2 supervisor defect (intermittent PermissionError in `terminate_group`) — see §9. Control-plane state/denials are unaffected (verified), but the supervisor may exit 1 and skip its lifecycle event.
-- The launcher is LOCAL-DEV only (a subprocess on the API host; registry in process memory; not available in Lambda/multi-process). The public launch endpoint is unauthenticated like the rest of the public API (demo); bind the API to localhost. Anyone who can reach it can start one agent per existing run.
-- **No real-AWS verification** of DynamoDB, Lambda, IAM, or Bedrock; nothing deployed; no AWS credentials or account were used (moto tests force fake credentials). Awaiting deployment account/region from you.
-- Contract `status` is mutable by design (active→superseded); everything else in a version is immutable. Run expiry is lazy. A stop landing after the final re-check but before a tool runs cannot be prevented by the control plane (inherent TOCTOU).
-- Trusted-test patterns are tuned for the frozen TypeScript/Node scope (a repo that keeps tests elsewhere needs the pattern list extended); a contract cannot opt out.
-- Dashboard: impact/approve/promote UI only exercised against a stub; draft not persisted across reload.
-- `intentlock-prd.md` is not in the repo.
-- Earlier global `pip install` upgraded packages in the shared Anaconda environment; all new dependencies now go into `.venv`.
+- **No dashboard→real-Kiro run yet.** Kiro is not installed/authenticated on this machine; the procedure and an opt-in test exist (`tests/integration/README.md`). Person 2's real-Kiro result predates the launcher integration.
+- **TwinGuard/promoter do not exist** (Person 2): impact reports, patches and promotion in my tests are simulated. Real exact-patch promotion, safe/unsafe patch handling and `TRUSTED_TEST_MODIFIED` enforcement are unverified end to end.
+- Person 2 issue tracker (7 items) in §9; items 1, 2, 3, 5 are open/unverified and affect stop reliability and the claim that all Kiro access is mediated.
+- Review authorization is an env allowlist of self-asserted names behind an unauthenticated public API (demo). Production needs real authentication (e.g. Cognito/IAM) before reviewer identity means anything.
+- Artifact reader is a LOCAL directory stand-in; no S3 reader/writer exists. The launcher is LOCAL-DEV only (subprocess on the API host).
+- **No real-AWS verification** of DynamoDB, Lambda, IAM or Bedrock; nothing deployed; Lambda account concurrency limit is 10; Bedrock model access is unverified (listing succeeded; invoke not tried).
+- Contract `status` is mutable by design; run expiry is lazy; stop-vs-tool TOCTOU window cannot be fully closed by the control plane.
+- Trusted-test patterns are tuned for the frozen TypeScript/Node scope.
+- Disk pressure: the dev machine's volume was at 99% during this session (a transient ENOSPC aborted one command). `.venv` (~280 MB) and `apps/web/node_modules` (~70 MB) are regenerable.
+- `intentlock-prd.md` is not in the repo (Person 2 gitignored their local copy).
 
 ## 13. Decisions Needed From Person 2
-1. Confirm the §9 milestone-4 requirements (mission as prompt, supervisor fix, SIGTERM handling, `/state` reporting, TwinGuard trusted baseline + `TRUSTED_TEST_MODIFIED`).
-2. Who serves `/api/impact/*` (control plane proxy vs direct) and the approve/reject/promote bodies listed earlier.
-3. Replace `apps/mcp-server/schemas` copies with canonical `packages/contracts` loading; merge strategy (PRs into `main`) — I have NOT merged anything.
+1. Confirm or counter-propose the TwinGuard contract in §9 (`POST /internal/impact`, artifact location, `POST /promote` request/response, `TRUSTED_TEST_MODIFIED`).
+2. Fix/confirm the open runner items (killpg PermissionError, SIGTERM handler, mission as prompt, call `/internal/runs/{id}/state`).
+3. Run the real-Kiro procedure against the combined app and inspect tool exposure interactively.
+4. Replace `apps/mcp-server/schemas` copies with canonical loading; merge strategy via reviewed PRs — I have NOT merged anything.
 
 ## 14. Next Steps
-1. Get Kiro installed and logged in, then run the real tests: `INTENTLOCK_REAL_KIRO=1 INTENTLOCK_PERSON2_CHECKOUT=<p2> pytest tests/integration -k REAL` and a manual dashboard run; this is the only way to claim real CLI-agent traffic.
-2. Person 2: sandbox + impact analysis + promotion with the trusted-baseline rule; then wire `/api/impact/*`, approve/promote and the final audit with real data.
-3. With your deployment account/region: deploy the template, run the real-table store tests and invoke the Lambda; then CloudWatch metrics and real Bedrock verification.
+1. Run the combined dashboard→real Kiro procedure on a machine with authenticated Kiro and record the evidence (`tests/integration/README.md`).
+2. Person 2 implements sandbox + impact analyzer + promoter against the §9 contract; then replace the simulated data with real reports end to end.
+3. With the owner's go-ahead: deploy the stack (`intentlock-control-plane-dev`, us-east-1), run the real-table store tests, invoke the Lambda; then CloudWatch metrics and a real Bedrock invoke.
 

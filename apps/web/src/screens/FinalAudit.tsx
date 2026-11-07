@@ -3,20 +3,24 @@ import { Badge, Card, Json, Notice, Spinner, StatusPill, Stepper } from "../comp
 import { api, ApiError } from "../lib/api";
 import { findImpactReportId, latencyStats, toolEvents } from "../lib/events";
 import { fmtMs, fmtTime, shortSha } from "../lib/format";
-import type { Contract, ImpactReport } from "../lib/types";
+import type { Contract, ImpactReport, ImpactStatus } from "../lib/types";
 import { useRunLive } from "../lib/useRunLive";
 
 export function FinalAudit({ runId }: { runId: string }) {
   const { run, events, notFound, error } = useRunLive(runId);
   const [contract, setContract] = useState<Contract | null>(null);
   const [impact, setImpact] = useState<ImpactReport | null>(null);
+  const [impactStatus, setImpactStatus] = useState<ImpactStatus | null>(null);
   const impactId = findImpactReportId(events);
 
   useEffect(() => {
     if (run) api.getContract(run.contract_id, run.contract_version).then(setContract).catch(() => undefined);
   }, [run?.contract_id, run?.contract_version]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (impactId) api.getImpact(impactId).then(setImpact).catch((e) => { if (!(e instanceof ApiError)) throw e; });
+    if (impactId) {
+      api.getImpact(impactId).then(setImpact).catch((e) => { if (!(e instanceof ApiError)) throw e; });
+      api.impactStatus(impactId).then(setImpactStatus).catch(() => undefined);
+    }
   }, [impactId]);
 
   if (notFound) return (<><Stepper active={4} /><Notice tone="error" title="Run not found">No run <code>{runId}</code> on this backend.</Notice></>);
@@ -29,7 +33,7 @@ export function FinalAudit({ runId }: { runId: string }) {
   const stats = latencyStats(events);
 
   function exportJson() {
-    const blob = new Blob([JSON.stringify({ run, contract, events, impact_report: impact }, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ run, contract, events, impact_report: impact, review_and_promotion: impactStatus }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = `intentlock-audit-${runId}.json`; a.click(); URL.revokeObjectURL(a.href);
   }
@@ -44,7 +48,10 @@ export function FinalAudit({ runId }: { runId: string }) {
           <dt>Started / ended</dt><dd>{run.started_at ?? "—"} → {run.stopped_at ?? run.completed_at ?? "still active"}</dd>
           {run.stop_reason && (<><dt>Stop reason</dt><dd><code>{run.stop_reason}</code></dd></>)}
           <dt>Base commit</dt><dd><code>{shortSha(run.base_commit, 12)}</code></dd>
-          <dt>Promotion</dt><dd>{promotions.length ? promotions.map((p) => <div key={p.seq}><Badge tone="ok">{p.event_type}</Badge> {p.message ?? ""} <Json value={p.details} /></div>)
+          <dt>Review</dt><dd>{impactStatus?.review
+            ? <><Badge tone={impactStatus.review.decision === "approve" ? "ok" : "stopped"}>{impactStatus.review.decision}</Badge> by <b>{impactStatus.review.reviewer}</b> at {impactStatus.review.reviewed_at} · contract v{impactStatus.review.contract_version} · base <code>{shortSha(impactStatus.review.base_commit, 12)}</code> · digest <code>{shortSha(impactStatus.review.patch_sha256, 16)}…</code></>
+            : <span className="muted">No review recorded.</span>}</dd>
+          <dt>Promotion</dt><dd>{impactStatus?.promotion && <div><Badge tone={impactStatus.promotion.status === "promoted" ? "ok" : impactStatus.promotion.status === "requested" ? "pending" : "deny"}>{impactStatus.promotion.status}</Badge> requested by {impactStatus.promotion.requested_by}{impactStatus.promotion.reason_code ? ` · ${impactStatus.promotion.reason_code}` : ""}{impactStatus.promotion.applied_patch_sha256 ? ` · applied digest ${shortSha(impactStatus.promotion.applied_patch_sha256, 16)}…` : ""}</div>}{promotions.length ? promotions.map((p) => <div key={p.seq}><Badge tone="ok">{p.event_type}</Badge> {p.message ?? ""} <Json value={p.details} /></div>)
             : <span className="muted">No promotion event recorded.</span>}</dd>
         </dl>
       </Card>

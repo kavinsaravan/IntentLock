@@ -72,3 +72,20 @@ export interface LaunchStatus {
   launched: boolean; launcher_pid?: number; alive?: boolean; exit_code?: number | null;
   started_at?: string; escalation?: string[];
 }
+
+export interface ReviewRecord {
+  review_id: string; impact_report_id: string; run_id: string; contract_id: string; contract_version: number;
+  base_commit: string; patch_sha256: string; decision: "approve" | "reject"; reviewer: string; reviewed_at: string;
+  comment: string | null;
+}
+export interface PromotionRecord {
+  impact_report_id: string; status: "requested" | "promoted" | "refused" | "failed"; requested_by: string;
+  requested_at: string; completed_at?: string; review_id: string; patch_sha256: string; base_commit: string;
+  reason_code?: string; message?: string; applied_patch_sha256?: string;
+}
+/** Authoritative review/promotion state computed by the BACKEND. The UI only renders it. */
+export interface ImpactStatus {
+  impact_report_id: string; decision: ImpactReport["decision"]; review: ReviewRecord | null; promotion: PromotionRecord | null;
+  can_approve: boolean; approve_blockers: string[]; can_promote: boolean; promote_blockers: string[];
+  reviewer_policy: string; promoter_configured: boolean; artifact_reader: string | null;
+}

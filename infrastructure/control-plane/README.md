@@ -40,3 +40,13 @@ uniquely named items and never delete or scan the table.
 ```bash
 INTENTLOCK_AWS_TEST_TABLE=<table> AWS_REGION=<region> python3 -m pytest apps/api/tests/test_store_contract.py -q
 ```
+
+## Intended deployment (NOT executed) — region `us-east-1`
+
+- **Stack name:** `intentlock-control-plane-dev`. **Region:** `us-east-1` (confirmed by the owner). **Account:** the owner's (confirm before deploy).
+- **Resources created by `template.yaml`:** `AWS::DynamoDB::Table` (`intentlock-control-plane`), `AWS::Logs::LogGroup` (`/aws/lambda/intentlock-authorizer`), `AWS::IAM::ManagedPolicy` x2 (table access, invoke), `AWS::IAM::Role` (authorizer), `AWS::Lambda::Function` (`intentlock-authorizer`), optional `AWS::Lambda::Url` (AWS_IAM). Plus, outside the stack: one S3 bucket/prefix that holds the Lambda zip (created manually or an existing bucket).
+- **Permissions the deploying principal needs:** `cloudformation:CreateStack/UpdateStack/DescribeStacks/DescribeStackEvents/GetTemplateSummary`; `iam:CreateRole/PutRolePolicy/AttachRolePolicy/PassRole/CreatePolicy/GetRole/GetPolicy` (scoped to `intentlock-*`); `dynamodb:CreateTable/DescribeTable/UpdateContinuousBackups/TagResource`; `lambda:CreateFunction/UpdateFunctionCode/GetFunction/CreateFunctionUrlConfig`; `logs:CreateLogGroup/PutRetentionPolicy`; `s3:PutObject/GetObject` on the code bucket.
+- **Runtime permissions (granted by the template):** the Lambda role may only `GetItem/PutItem/UpdateItem/Query` on that one table and write its own log group. No Scan, no Delete, no Bedrock. The API host (if it uses DynamoDB) needs the same table policy.
+
+### Read-only checks performed 2026-11-07 (no resources created or changed)
+`sts get-caller-identity` (credentials valid, an IAM *user* principal), `dynamodb list-tables` (0 tables in us-east-1), `cloudformation describe-stacks intentlock-control-plane-dev` (does not exist), `lambda get-function intentlock-authorizer` (does not exist), `lambda get-account-settings` (**ConcurrentExecutions limit = 10**, so reserved concurrency cannot be used meaningfully), `bedrock list-foundation-models --by-provider anthropic` (15 models listed; listing does NOT prove model access is granted — verify with a real invoke before relying on Bedrock). Nothing else was called.

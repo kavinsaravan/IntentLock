@@ -14,7 +14,10 @@ from intentlock_policy import SCHEMA_VERSION
 from intentlock_policy.models import MissionContract, MissionContractDraft, Run
 from intentlock_policy.redact import sanitize_details
 
+from . import impact as impact_api
 from . import service
+from .artifacts import LocalDirArtifactReader
+from .promoter import PromoterClient
 from .launcher import AgentLauncher, AlreadyLaunched, LaunchError, LauncherNotConfigured
 from .bedrock import ProposalError, bedrock_invoker, propose_draft
 from .store import ContractExists, StoreError, create_store_from_env, now
@@ -71,11 +74,15 @@ class IngestEventBody(BaseModel):
     details: dict[str, Any] | None = None
 
 
-def create_app(store: Any = None, launcher: Any = None,
+def create_app(store: Any = None, launcher: Any = None, artifacts: Any = "env", promoter: Any = "env",
+               reviewers: Any = "env",
                invoker: Callable[[str, str], str] | None = None,
                internal_token: str | None = None) -> FastAPI:
     store = store if store is not None else create_store_from_env()
     launcher = launcher if launcher is not None else AgentLauncher(store)
+    artifacts = LocalDirArtifactReader.from_env() if artifacts == "env" else artifacts
+    promoter = PromoterClient.from_env() if promoter == "env" else promoter
+    reviewers = impact_api.reviewers_from_env() if reviewers == "env" else reviewers
     token = internal_token if internal_token is not None else os.environ.get("INTENTLOCK_INTERNAL_TOKEN", "")
     app = FastAPI(title="IntentLock control plane", version=SCHEMA_VERSION)
     origins = os.environ.get("INTENTLOCK_CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -288,4 +295,5 @@ def create_app(store: Any = None, launcher: Any = None,
                                 details=sanitize_details(body.details) if body.details else None)
         return ev.model_dump(mode="json")
 
+    impact_api.register(app, store, artifacts, promoter, require_internal, lambda: now(), reviewers)
     return app

@@ -1,14 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DiffView } from "../components/DiffView";
-import { Badge, Card, Json, Notice, Spinner, Stepper } from "../components/ui";
+import { Badge, Card, Notice, Spinner, Stepper } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { findImpactReportId, toolEvents } from "../lib/events";
 import { shortSha } from "../lib/format";
-import type { ImpactReport } from "../lib/types";
+import type { ImpactReport, ImpactStatus } from "../lib/types";
 import { useRunLive } from "../lib/useRunLive";
 
 type Load<T> = { s: "idle" } | { s: "loading" } | { s: "unavailable"; why: string } | { s: "error"; why: string } | { s: "ok"; v: T };
 const sevTone = (s: string) => (s === "critical" || s === "high" ? "deny" : s === "medium" ? "review" : "info") as "deny" | "review" | "info";
+const BLOCKER_TEXT: Record<string, string> = {
+  IMPACT_BLOCKED: "TwinGuard blocked this patch", ALREADY_REVIEWED: "a decision was already recorded", NOT_APPROVED: "no approval recorded",
+  ALREADY_REQUESTED: "promotion was already requested", PATCH_HASH_MISMATCH: "patch bytes do not match the reported digest",
+  PATCH_UNAVAILABLE: "patch artifact unavailable", STALE_BASE_COMMIT: "base commit no longer matches", CONTRACT_NOT_ACTIVE: "the contract was superseded or revoked",
+  RUN_NOT_ELIGIBLE: "the run was blocked or failed", RUN_NOT_FOUND: "run not found", CONTRACT_NOT_FOUND: "contract not found",
+  PROMOTER_NOT_CONFIGURED: "no patch promoter is configured on this backend",
+};
+const why = (codes: string[]) => codes.map((c) => BLOCKER_TEXT[c] ?? c).join("; ");
 
 export function ImpactReview({ runId }: { runId: string }) {
   const { events } = useRunLive(runId);
@@ -17,43 +25,45 @@ export function ImpactReview({ runId }: { runId: string }) {
   const id = detected ?? (manual.trim() || null);
   const [rep, setRep] = useState<Load<ImpactReport>>({ s: "idle" });
   const [patch, setPatch] = useState<Load<string>>({ s: "idle" });
+  const [status, setStatus] = useState<ImpactStatus | null>(null);
   const [reviewer, setReviewer] = useState("demo-user");
-  const [action, setAction] = useState<{ s: "idle" | "busy" | "done" | "err"; msg?: string; body?: Record<string, unknown>; kind?: string }>({ s: "idle" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionErr, setActionErr] = useState<string | null>(null);
+
+  const refreshStatus = useCallback(async (iid: string) => {
+    try { setStatus(await api.impactStatus(iid)); } catch { setStatus(null); }
+  }, []);
 
   useEffect(() => {
-    if (!id) { setRep({ s: "idle" }); setPatch({ s: "idle" }); return; }
+    if (!id) { setRep({ s: "idle" }); setPatch({ s: "idle" }); setStatus(null); return; }
     let off = false;
-    setRep({ s: "loading" }); setPatch({ s: "loading" });
+    setRep({ s: "loading" }); setPatch({ s: "loading" }); setActionErr(null);
     api.getImpact(id).then((v) => !off && setRep({ s: "ok", v }))
       .catch((e: unknown) => !off && setRep(e instanceof ApiError && e.unavailable
         ? { s: "unavailable", why: `GET /api/impact/${id} → ${e.message}` } : { s: "error", why: String(e) }));
     api.getPatch(id).then((v) => !off && setPatch({ s: "ok", v }))
       .catch((e: unknown) => !off && setPatch({ s: "unavailable", why: e instanceof ApiError ? e.message : String(e) }));
-    return () => { off = true; };
-  }, [id]);
+    refreshStatus(id);
+    const t = setInterval(() => refreshStatus(id), 4000);
+    return () => { off = true; clearInterval(t); };
+  }, [id, refreshStatus]);
 
-  async function review(kind: "approve" | "reject") {
+  async function act(kind: "approve" | "reject" | "promote") {
     if (rep.s !== "ok") return;
-    setAction({ s: "busy", kind });
+    const r = rep.v; setBusy(kind); setActionErr(null);
     try {
-      const body = await api.review(rep.v.impact_report_id, kind, { reviewer, patch_sha256: rep.v.patch_sha256, base_commit: rep.v.base_commit });
-      setAction({ s: "done", kind, body, msg: `Backend accepted ${kind}.` });
-    } catch (e) { setAction({ s: "err", kind, msg: e instanceof ApiError ? (e.unavailable ? `${kind} endpoint is not available on this backend yet (${e.message}).` : e.message) : String(e) }); }
-  }
-  async function promote() {
-    if (rep.s !== "ok") return;
-    setAction({ s: "busy", kind: "promote" });
-    try {
-      const body = await api.promote(rep.v.impact_report_id, { patch_sha256: rep.v.patch_sha256 });
-      setAction({ s: "done", kind: "promote", body, msg: "Backend returned a promotion result." });
-    } catch (e) { setAction({ s: "err", kind: "promote", msg: e instanceof ApiError ? e.message : String(e) }); }
+      if (kind === "promote") await api.promote(r.impact_report_id, { requested_by: reviewer, patch_sha256: r.patch_sha256 });
+      else await api.review(r.impact_report_id, kind, { reviewer, patch_sha256: r.patch_sha256, base_commit: r.base_commit });
+    } catch (e) {
+      setActionErr(e instanceof ApiError ? (e.unavailable ? `${kind} endpoint unavailable (${e.message})` : `${kind} refused by backend: ${e.message}`) : String(e));
+    } finally { setBusy(null); await refreshStatus(r.impact_report_id); }
   }
 
   const patchReq = toolEvents(events).filter((e) => e.tool === "propose_patch").at(-1);
   const r = rep.s === "ok" ? rep.v : null;
   const blocked = r?.decision === "block";
-  const busy = action.s === "busy";
-  const approved = action.s === "done" && action.kind === "approve";
+  const rv = status?.review ?? null;
+  const pr = status?.promotion ?? null;
 
   return (
     <>
@@ -74,7 +84,7 @@ export function ImpactReview({ runId }: { runId: string }) {
         <Card title="TwinGuard impact report">
           {!id && (
             <Notice tone="info" title="No impact report yet">
-              No <code>impact_report</code> event with an <code>impact_report_id</code> has been received for this run. TwinGuard belongs to the execution plane and reports through <code>POST /internal/events</code>.
+              No <code>impact_report</code> event with an <code>impact_report_id</code> has been received for this run. TwinGuard belongs to the execution plane and submits reports to <code>POST /internal/impact</code>.
             </Notice>
           )}
           <label className="field"><span>Load an impact report by id</span>
@@ -82,7 +92,7 @@ export function ImpactReview({ runId }: { runId: string }) {
         </Card>
       )}
       {id && rep.s === "loading" && <Spinner label={`Loading impact report ${id}…`} />}
-      {id && rep.s === "unavailable" && <Notice tone="warn" title="Impact report unavailable">The impact endpoint is not reachable or not implemented yet ({rep.why}). This screen fills in automatically once the execution plane serves <code>GET /api/impact/{"{id}"}</code>.</Notice>}
+      {id && rep.s === "unavailable" && <Notice tone="warn" title="Impact report unavailable">Not found or backend unreachable ({rep.why}).</Notice>}
       {id && rep.s === "error" && <Notice tone="error" title="Could not load impact report">{rep.why}</Notice>}
 
       {r && (<>
@@ -113,21 +123,27 @@ export function ImpactReview({ runId }: { runId: string }) {
         </div>
         <Card title="Exact patch under review">
           {patch.s === "loading" && <Spinner label="Loading patch…" />}
-          {patch.s === "unavailable" && <Notice tone="warn" title="Patch text unavailable">Expected <code>GET /api/impact/{r.impact_report_id}/patch</code> to return the reviewed patch (text). Without it the diff cannot be shown; do not approve what you cannot read.</Notice>}
+          {patch.s === "unavailable" && <Notice tone="warn" title="Patch text unavailable">The backend could not serve a patch whose SHA-256 matches this report ({patch.why}). Do not approve what you cannot read.</Notice>}
           {patch.s === "ok" && <DiffView patch={patch.v} />}
         </Card>
         <Card title="Human review">
-          {blocked && <Notice tone="error" title="Blocked by TwinGuard">Blocked patches cannot be approved or promoted.</Notice>}
+          {blocked && <Notice tone="error" title="Blocked by TwinGuard">Blocked patches cannot be approved or promoted (enforced by the backend).</Notice>}
           <label className="field"><span>Reviewer</span><input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={128} /></label>
+          {status && <p className="muted">Reviewer policy: {status.reviewer_policy}.</p>}
           <div className="row">
-            <button className="btn primary" disabled={blocked || patch.s !== "ok" || !reviewer.trim() || busy} onClick={() => review("approve")}>Approve exact patch {shortSha(r.patch_sha256, 8)}</button>
-            <button className="btn" disabled={!reviewer.trim() || busy} onClick={() => review("reject")}>Reject</button>
-            <button className="btn" disabled={blocked || !approved || busy} onClick={promote}>Promote approved patch</button>
+            <button className="btn primary" disabled={!status?.can_approve || patch.s !== "ok" || !reviewer.trim() || busy !== null} onClick={() => act("approve")}>Approve exact patch {shortSha(r.patch_sha256, 8)}</button>
+            <button className="btn" disabled={!!rv || !reviewer.trim() || busy !== null} onClick={() => act("reject")}>Reject</button>
+            <button className="btn" disabled={!status?.can_promote || !reviewer.trim() || busy !== null} onClick={() => act("promote")}>Request promotion</button>
           </div>
-          <p className="muted">Approval binds your decision to base commit <code>{shortSha(r.base_commit, 8)}</code> and this SHA-256. Promotion applies only that artifact after the backend verifies both.</p>
-          {action.s === "busy" && <Spinner label={`Sending ${action.kind}…`} />}
-          {action.s === "done" && <Notice tone="info" title={action.msg}><Json value={action.body} /></Notice>}
-          {action.s === "err" && <Notice tone="error" title={`${action.kind} failed`}>{action.msg}</Notice>}
+          {status && !status.can_approve && !rv && <p className="muted">Approval unavailable: {why(status.approve_blockers)}.</p>}
+          {status && rv?.decision === "approve" && !status.can_promote && !pr && <p className="muted">Promotion unavailable: {why(status.promote_blockers)}.</p>}
+          <p className="muted">Approval records your identity, the contract version, base commit <code>{shortSha(r.base_commit, 8)}</code> and this SHA-256. A separate request asks the patch promoter to apply exactly that artifact; the promoter re-verifies both before changing anything.</p>
+          {busy && <Spinner label={`Sending ${busy}…`} />}
+          {actionErr && <Notice tone="error" title="Action not completed">{actionErr}</Notice>}
+          {rv && <Notice tone={rv.decision === "approve" ? "info" : "warn"} title={`Review recorded: ${rv.decision.toUpperCase()}`}>
+            <code>{rv.review_id}</code> by <b>{rv.reviewer}</b> at {rv.reviewed_at} · contract v{rv.contract_version} · base <code>{shortSha(rv.base_commit, 8)}</code> · digest <code>{shortSha(rv.patch_sha256, 12)}…</code></Notice>}
+          {pr && <Notice tone={pr.status === "promoted" ? "info" : pr.status === "requested" ? "warn" : "error"} title={`Promotion ${pr.status.toUpperCase()}`}>
+            requested by {pr.requested_by}{pr.completed_at ? `, completed ${pr.completed_at}` : ""}{pr.reason_code ? ` · ${pr.reason_code}` : ""}{pr.message ? ` · ${pr.message}` : ""}{pr.applied_patch_sha256 ? ` · applied digest ${shortSha(pr.applied_patch_sha256, 12)}…` : ""}</Notice>}
         </Card>
       </>)}
     </>

@@ -43,13 +43,21 @@ def redact_arguments(tool: str, args: Any) -> dict[str, Any]:
     return {"keys": sorted(str(k) for k in args)[:16]}
 
 
-def sanitize_details(obj: Any, depth: int = 0) -> Any:
+# Audit fields that legitimately hold a hex digest/commit. Preserved ONLY when the value is exactly
+# 40 or 64 lowercase hex characters; any other long token under any key is still redacted.
+_DIGEST_KEYS = {"patch_sha256", "applied_patch_sha256", "base_commit", "sha256", "commit", "resulting_commit"}
+_HEX_RX = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+def sanitize_details(obj: Any, depth: int = 0, key: str | None = None) -> Any:
     """Strip sensitive keys / secret-like strings from free-form event details."""
     if depth > 4:
         return "[TRUNCATED]"
+    if isinstance(obj, str) and key in _DIGEST_KEYS and _HEX_RX.match(obj):
+        return obj
     if isinstance(obj, dict):
         return {str(k)[:64]: ("[REDACTED]" if str(k).lower() in _SENSITIVE_KEYS
-                              else sanitize_details(v, depth + 1))
+                              else sanitize_details(v, depth + 1, str(k)))
                 for k, v in list(obj.items())[:50]}
     if isinstance(obj, list):
         return [sanitize_details(v, depth + 1) for v in obj[:50]]

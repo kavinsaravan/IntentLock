@@ -270,3 +270,13 @@ def test_always_allowed_tools_obey_run_state_limits_and_args(make_req, run, cont
         assert run_auth(make_req(tool, args, contract_version=9), run, contract).reason_code == "CONTRACT_VERSION_MISMATCH"
         assert run_auth(make_req(tool, args), run, contract, prior=50).reason_code == "TOOL_CALL_LIMIT_EXCEEDED"
         assert run_auth(make_req(tool, {**args, "extra": 1}), run, contract).reason_code == "INVALID_ARGUMENTS"
+
+
+def test_sanitize_keeps_digest_fields_only_when_exactly_hex():
+    from intentlock_policy.redact import sanitize_details
+    sha = "a" * 64
+    out = sanitize_details({"patch_sha256": sha, "base_commit": "b" * 40, "note": sha, "patch_sha256_x": sha,
+                            "other": {"patch_sha256": "A" * 64}, "token": sha})
+    assert out["patch_sha256"] == sha and out["base_commit"] == "b" * 40
+    assert out["note"] == "[REDACTED]" and out["patch_sha256_x"] == "[REDACTED]" and out["token"] == "[REDACTED]"
+    assert out["other"]["patch_sha256"] == "[REDACTED]"        # uppercase / non-exact hex is not exempt

@@ -22,9 +22,9 @@ import boto3
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
-from intentlock_policy.models import Event, MissionContract, ReviewApproval, Run
+from intentlock_policy.models import Event, ImpactReport, MissionContract, ReviewApproval, Run
 
-from .store import ContractExists, RunExists, StoreError, _iso, now
+from .store import ContractExists, ImpactExists, RunExists, StoreError, _iso, now
 
 _ser = TypeSerializer()
 _RUN_ATTRS = set(Run.model_fields)
@@ -242,6 +242,80 @@ class DynamoStore:
         except ClientError as e:
             raise self._wrap(e) from e
         return [ReviewApproval.model_validate_json(i["data"]) for i in r["Items"]]
+
+    # ------------------------------------------- impact / final review / promotion
+    def put_impact(self, r: ImpactReport) -> None:
+        try:
+            self._t.put_item(Item={"pk": f"IMPACT#{r.impact_report_id}", "sk": "REPORT", "data": r.model_dump_json(),
+                                   "run_id": r.run_id}, ConditionExpression="attribute_not_exists(pk)")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == _COND_FAIL:
+                raise ImpactExists(r.impact_report_id) from e
+            raise self._wrap(e) from e
+
+    def get_impact(self, impact_report_id: str) -> ImpactReport | None:
+        try:
+            it = self._t.get_item(Key={"pk": f"IMPACT#{impact_report_id}", "sk": "REPORT"}, ConsistentRead=True).get("Item")
+        except ClientError as e:
+            raise self._wrap(e) from e
+        return ImpactReport.model_validate_json(it["data"]) if it else None
+
+    def get_final_review(self, impact_report_id: str) -> ReviewApproval | None:
+        try:
+            it = self._t.get_item(Key={"pk": f"REVIEW#{impact_report_id}", "sk": "FINAL"}, ConsistentRead=True).get("Item")
+        except ClientError as e:
+            raise self._wrap(e) from e
+        return ReviewApproval.model_validate_json(it["data"]) if it else None
+
+    def put_final_review(self, r: ReviewApproval) -> tuple[ReviewApproval, bool]:
+        try:
+            self._t.put_item(Item={"pk": f"REVIEW#{r.impact_report_id}", "sk": "FINAL", "data": r.model_dump_json()},
+                             ConditionExpression="attribute_not_exists(pk)")
+            return r, True
+        except ClientError as e:
+            if e.response["Error"]["Code"] == _COND_FAIL:
+                cur = self.get_final_review(r.impact_report_id)
+                if cur is not None:
+                    return cur, False
+            raise self._wrap(e) from e
+
+    def put_promotion(self, rec: dict[str, Any]) -> bool:
+        item = {k: v for k, v in rec.items() if v is not None}
+        item.update(pk=f"PROMO#{rec['impact_report_id']}", sk="STATE")
+        try:
+            self._t.put_item(Item=item, ConditionExpression="attribute_not_exists(pk)")
+            return True
+        except ClientError as e:
+            if e.response["Error"]["Code"] == _COND_FAIL:
+                return False
+            raise self._wrap(e) from e
+
+    @staticmethod
+    def _promo_from_item(it: dict[str, Any]) -> dict[str, Any]:
+        return {k: (int(v) if isinstance(v, Decimal) else v) for k, v in it.items() if k not in ("pk", "sk")}
+
+    def get_promotion(self, impact_report_id: str) -> dict[str, Any] | None:
+        try:
+            it = self._t.get_item(Key={"pk": f"PROMO#{impact_report_id}", "sk": "STATE"}, ConsistentRead=True).get("Item")
+        except ClientError as e:
+            raise self._wrap(e) from e
+        return self._promo_from_item(it) if it else None
+
+    def transition_promotion(self, impact_report_id: str, from_statuses: Iterable[str], **fields: Any) -> dict[str, Any] | None:
+        froms = list(from_statuses)
+        fields = {k: v for k, v in fields.items() if v is not None}
+        names = {f"#{k}": k for k in fields}; names["#status"] = "status"
+        values = {f":{k}": v for k, v in fields.items()}; values.update({f":f{i}": s for i, s in enumerate(froms)})
+        expr = "SET " + ", ".join(f"#{k} = :{k}" for k in fields)
+        try:
+            r = self._t.update_item(Key={"pk": f"PROMO#{impact_report_id}", "sk": "STATE"}, UpdateExpression=expr,
+                                    ConditionExpression="#status IN (" + ", ".join(f":f{i}" for i in range(len(froms))) + ")",
+                                    ExpressionAttributeNames=names, ExpressionAttributeValues=values, ReturnValues="ALL_NEW")
+        except ClientError as e:
+            if e.response["Error"]["Code"] == _COND_FAIL:
+                return None
+            raise self._wrap(e) from e
+        return self._promo_from_item(r["Attributes"])
 
 
 TABLE_DEFINITION: dict[str, Any] = {

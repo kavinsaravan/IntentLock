@@ -1,4 +1,4 @@
-import type { Contract, ContractDraft, EventRec, Health, ImpactReport, LauncherInfo, LaunchStatus, Run } from "./types";
+import type { Contract, ContractDraft, EventRec, Health, ImpactReport, ImpactStatus, LauncherInfo, LaunchStatus, Run } from "./types";
 
 // Empty in dev => same-origin via the Vite proxy. Set VITE_API_URL for a deployed API.
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
@@ -71,6 +71,7 @@ export const api = {
   // --- Execution-plane / TwinGuard interfaces (NOT implemented by this backend yet). ---
   // Expected shapes are documented in docs/handoffs/person1-control-plane.md.
   getImpact: (id: string) => call<ImpactReport>(`/api/impact/${encodeURIComponent(id)}`),
+  impactStatus: (id: string) => call<ImpactStatus>(`/api/impact/${encodeURIComponent(id)}/status`),
   getPatch: async (id: string): Promise<string> => {
     let res: Response;
     try { res = await fetch(`${API_BASE}/api/impact/${encodeURIComponent(id)}/patch`); }
@@ -81,6 +82,6 @@ export const api = {
   review: (id: string, action: "approve" | "reject",
            b: { reviewer: string; patch_sha256: string; base_commit: string }) =>
     call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, post(b)),
-  promote: (id: string, b: { patch_sha256: string }) =>
+  promote: (id: string, b: { requested_by: string; patch_sha256: string }) =>
     call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, post(b)),
 };

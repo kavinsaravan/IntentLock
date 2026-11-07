@@ -146,3 +146,49 @@ def test_reviews(store):
     with pytest.raises(ContractExists):
         store.put_review(mk(1))
     assert store.list_reviews(uid("none")) == []
+
+
+# ---- impact reports, single final review, promotion records ----------------------------------------
+def mk_impact(iid=None):
+    from intentlock_policy.models import ImpactReport
+    d = json.loads((FIX / "impact-report.json").read_text()); d["impact_report_id"] = iid or uid("impact")
+    return ImpactReport.model_validate(d)
+
+
+def mk_final(iid, who, decision="approve"):
+    return ReviewApproval(review_id=f"rev_{iid}", impact_report_id=iid, run_id="run_x", contract_id="c", contract_version=1,
+                          base_commit="0" * 40, patch_sha256="a" * 64, decision=decision, reviewer=who, reviewed_at=T0)
+
+
+def test_impact_reports_are_immutable(store):
+    from intentlock_api.store import ImpactExists
+    r = mk_impact(); store.put_impact(r)
+    assert store.get_impact(r.impact_report_id) == r
+    with pytest.raises(ImpactExists):
+        store.put_impact(r.model_copy(update={"decision": "pass"}))
+    assert store.get_impact(r.impact_report_id).decision == r.decision
+    assert store.get_impact(uid("none")) is None
+
+
+def test_final_review_first_decision_wins_under_race(store):
+    iid = uid("impact")
+    res = threads(12, lambda i: store.put_final_review(mk_final(iid, f"u{i}", "approve" if i % 2 else "reject")))
+    created = [r for r, c in res if c]
+    assert len(created) == 1
+    assert all(r.reviewer == created[0].reviewer for r, _ in res)          # everyone sees the same winner
+    assert store.get_final_review(iid).reviewer == created[0].reviewer
+    assert store.get_final_review(uid("none")) is None
+
+
+def test_promotion_record_is_created_once_and_transitions_cas(store):
+    iid = uid("impact")
+    rec = {"impact_report_id": iid, "status": "requested", "requested_by": "u", "requested_at": "t", "review_id": "rv",
+           "patch_sha256": "a" * 64, "base_commit": "0" * 40}
+    assert threads(10, lambda i: store.put_promotion(dict(rec))).count(True) == 1
+    assert store.get_promotion(iid)["status"] == "requested"
+    win = threads(10, lambda i: store.transition_promotion(iid, ["requested"], status="promoted", completed_at="t2", applied_patch_sha256="a" * 64))
+    assert len([w for w in win if w]) == 1
+    got = store.get_promotion(iid)
+    assert got["status"] == "promoted" and got["applied_patch_sha256"] == "a" * 64 and got["requested_by"] == "u"
+    assert store.transition_promotion(iid, ["requested"], status="failed") is None
+    assert store.get_promotion(uid("none")) is None
