@@ -25,7 +25,9 @@
 | CloudWatch | Lambda logs go to a CloudWatch log group once deployed; custom metrics NOT implemented |
 | React dashboard (5 screens) | Tested locally (manual browser run; unit tests for pure logic) |
 | Impact/approve/promote UI | Only exercised against a throwaway stub; backend endpoints do not exist |
-| Execution-plane integration | **Tested locally, cross-workstream:** Person 2's `tests/sandbox` (15 tests incl. 2 real localhost HTTP MCP→API tests) pass against this branch at `8064936` (memory store). Not yet re-run on DynamoDB mode; no live Kiro/model traffic (their Kiro is not logged in) |
+| Agent launch from dashboard (control-plane side) | Tested locally: `POST /api/runs/{id}/launch` starts a CONFIGURED runner subprocess; verified in the browser against Person 2's real `launch_kiro.py` supervisor with a SYNTHETIC kiro stand-in. **Never run with real Kiro (not installed/logged in here)** |
+| Trusted-test protection (authorization layer) | Tested locally (17 tests + shared vectors). TwinGuard side NOT implemented (Person 2) |
+| Execution-plane integration | Tested locally: Person 2's `tests/sandbox` (15) pass against this branch; my `tests/integration` (4 pass, 1 xfail-tolerant, 1 real-Kiro test skipped) drive their real runner/MCP server. **No real Kiro/model traffic has occurred** |
 
 ## 4. Completed Features
 - **Canonical schemas** — `packages/contracts/schemas/*.schema.json`, fixtures in `packages/contracts/fixtures/`, models in `packages/policy-engine/intentlock_policy/models.py`. Tested locally.
@@ -53,6 +55,13 @@ Behaviour: header shows real `/health` (API connected / store label / schema ver
 - **Lambda** (`lambda_handler.py`, handler `intentlock_api.lambda_handler.handler`): direct-invoke event = ToolRequest → AuthorizationDecision; Function-URL/API-GW proxy event (`body`, optionally base64) → `{statusCode:200, body}`. Any error/misconfig ⇒ DENY. The deployable zip (`build_lambda.sh`) excludes `app.py` and `bedrock.py`; a test asserts the handler never imports Bedrock. IAM-authenticated callers only; AgentCore interceptor payload mapping NOT implemented/verified.
 - **New endpoint** (requested by Person 2): `POST /internal/runs/{run_id}/state` — see §7.
 
+### Milestone 4 — real agent launch + trusted tests (2026-11-07)
+- **Launcher** (`apps/api/intentlock_api/launcher.py`, LOCAL-DEV only, not used by Lambda): the control plane spawns the execution plane's runner as a subprocess. Command is FIXED by server config (`INTENTLOCK_AGENT_LAUNCH_ARGV`, JSON array, no shell, placeholders `{run_id} {contract_id} {contract_version} {mission}`; use `--prompt={mission}`); requests supply only a run id. Child env is an allowlist (PATH, HOME, USER, LANG, LC_ALL, TMPDIR, KIRO_CLI_BINARY + `INTENTLOCK_API_URL`/`INTENTLOCK_INTERNAL_TOKEN`); `AWS_*` is never forwarded even if listed. Runner stdout/stderr go to a private log dir (never served). One launch per run. A watcher thread: when the run is terminal and the runner is still alive after `INTENTLOCK_AGENT_STOP_GRACE_SECONDS` (default 3) it escalates against the RUNNER's process group: SIGINT → +2s SIGTERM → +4s SIGKILL; when the runner exits and the run is still active it sets `completed` (exit 0) or `failed` (non-zero; reason `agent launcher exited with code N`) via the same atomic transition; a runner that already reported state is not overwritten.
+- **API:** `GET /api/launcher`, `POST /api/runs/{id}/launch` (201 / 409 `RUN_NOT_ACTIVE|CONTRACT_NOT_ACTIVE|ALREADY_LAUNCHED` / 503 `AGENT_LAUNCHER_NOT_CONFIGURED` / 502 `AGENT_LAUNCH_FAILED` which also marks the run `failed`), `GET /api/runs/{id}/launch` → `{launched, launcher_pid, alive, exit_code, started_at, escalation}`. `POST .../stop` now returns `process_termination` ∈ `launcher_watcher_armed | launcher_already_exited | delegated_to_execution_plane`; it never claims the process is dead.
+- **Dashboard:** "Approve and launch" creates the contract and run, then asks the backend to launch (failure is not hidden); the Active Run screen shows the real launcher state (running/exited+code/not configured/not launched), a manual "Launch agent" button when configured, the agent PID Person 2's supervisor registered, and backstop signals if the watcher had to escalate.
+- **Trusted tests** (`engine.py: _check_trusted_tests`, deterministic, `propose_patch` only; reads stay allowed): a patch is denied `PATH_NOT_ALLOWED` with `evidence.rule="TRUSTED_TEST_READ_ONLY"` (no stop-run) if it creates/modifies/deletes/renames any path matching `tests/**`, `test/**`, `__tests__/**`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `*.test.*`, `*.spec.*`, `jest.config.*`, `vitest.config.*`, `.mocharc*`, `jest.setup.*`, `setupTests.*` (case-insensitive), any repo-relative file named in an approved test's argv, or `package.json` entries that change `scripts`, lifecycle scripts (`install/preinstall/postinstall/prepare/…`), anything starting `test`, or the script name(s) referenced by approved argv (`npm|pnpm|yarn run X`, plus `preX/postX`); plus any create/delete/rename of `package.json`. It overrides the contract's `allowed_paths` (the PRD example allows `tests/auth/**`; that now only permits READING). Protected-path precedence is unchanged. No schema change: uses existing reason code + free-form `evidence`. Shared test vectors: `packages/contracts/fixtures/patch-vectors/trusted-tests.json`.
+- **Environment:** project venv `.venv` (gitignored) with `apps/api/requirements.txt` / `requirements-dev.txt`; `apps/api/.env.example` lists all variables.
+
 ## 5. Current Implementation Work
 Dashboard is functional against the local API. Next per instruction: integrate Person 2's MCP traffic, then DynamoDB, Lambda, CloudWatch, real Bedrock verification. Nothing half-finished in the tree.
 
@@ -60,6 +69,8 @@ Dashboard is functional against the local API. Next per instruction: integrate P
 `AGENTS.md` (shared root file — new; Person 2 must review/integrate), `.gitignore`, `pytest.ini`, `packages/contracts/**` (shared dir, proposed), `packages/policy-engine/**`, `apps/api/**`, `tests/contract/**`, `tests/policy/**`, this handoff. Milestone 2 added `apps/web/**`, small `apps/api` changes (lazy run expiry, `Last-Event-ID`), extra tests. `.gitignore` gained `dist/`. `packages/event-model/` is an empty placeholder (Event schema lives in `packages/contracts`).
 
 Milestone 3: `apps/api/intentlock_api/{store,dynamo_store,service,lambda_handler,app}.py` (store refactor, new modules), `apps/api/tests/{conftest,test_store_contract,test_lambda_handler,test_api}.py`, `infrastructure/control-plane/{template.yaml,build_lambda.sh,README.md}`, `.gitignore` (`infrastructure/control-plane/build/`), this handoff.
+
+Milestone 4: `apps/api/intentlock_api/{launcher,app}.py`, `apps/api/tests/test_launcher.py`, `apps/api/requirements*.txt`, `apps/api/.env.example`, `packages/policy-engine/intentlock_policy/engine.py`, `tests/policy/test_trusted_tests.py`, `packages/contracts/fixtures/patch-vectors/trusted-tests.json` (shared dir, proposed), `tests/integration/test_agent_launch_e2e.py`, `apps/web/src/{lib/api.ts,lib/types.ts,screens/ActiveRun.tsx,screens/ReviewContract.tsx}`, `AGENTS.md` (venv guidance), `.gitignore`.
 
 ## 7. API Endpoints
 Base URL (local): `http://127.0.0.1:8787` — start: `cd apps/api && PYTHONPATH=../../packages/policy-engine:. INTENTLOCK_INTERNAL_TOKEN=<token> python3 -m uvicorn intentlock_api.app:create_app --factory --port 8787`
@@ -137,6 +148,20 @@ Lambda is an ALTERNATIVE transport (e.g. for AgentCore later); they do not need 
 
 **Configuration for MCP integration (HTTP):** API base URL (`http://127.0.0.1:8787` local), `INTENTLOCK_INTERNAL_TOKEN` (same value on both sides), request = ToolRequest, response = AuthorizationDecision (always HTTP 200 for `/internal/authorize`; 401 bad token, 503 token unset). Honor `stop_run:true`/`RUN_NOT_ACTIVE` by terminating the agent. Report completion with `/internal/runs/{id}/state`. Run API on DynamoDB with `INTENTLOCK_STORE=dynamodb` etc. (see `infrastructure/control-plane/README.md`).
 
+### Milestone 4 — exact requirements for Person 2 (read this)
+Read from `origin/codex/person2-execution-plane@8a93b37` (unchanged since last check). Their runner interface as I integrated it: `python3 -B apps/mcp-server/launch_kiro.py --repository <repo> --run-id R --contract-id C --contract-version V [--prompt P]` with env `INTENTLOCK_API_URL`, `INTENTLOCK_INTERNAL_TOKEN`, optional `KIRO_CLI_BINARY`; it is also the supervisor. Control plane launches it via `INTENTLOCK_AGENT_LAUNCH_ARGV` (example in `apps/api/.env.example`). **No change to their interface was needed for launch.** What I need from them:
+1. **Pass the mission as the prompt.** Their default `--prompt` is a hard-coded synthetic string. The control plane passes `--prompt={mission}`; confirm it is used as the Kiro prompt and still treated as untrusted-by-prompt-injection data.
+2. **Fix an intermittent supervisor defect** in `lifecycle.terminate_group`: the final `os.killpg(pid, SIGKILL)` can raise `PermissionError` on macOS (seen once during a dashboard stop; the agent and MCP server were gone, but the supervisor exited 1 and skipped its final event). Catch `(ProcessLookupError, PermissionError)` around both `killpg` calls. Test: `tests/integration/...::test_supervisor_exits_cleanly_with_lifecycle_event_after_stop` (xfail-tolerant).
+3. **Signals:** the runner only cleans up the agent group on SIGINT (KeyboardInterrupt). Add a SIGTERM handler that runs the same cleanup. Until then the control plane's backstop sends SIGINT first, then SIGTERM, then SIGKILL (SIGTERM/SIGKILL would orphan the agent group).
+4. **Report completion** with `POST /internal/runs/{id}/state {"status":"completed"|"failed","reason"?}` when the agent task ends; otherwise the launcher watcher infers `completed` (exit 0) / `failed` (non-zero) for runs it launched.
+5. **TwinGuard must enforce the trusted-test rule too** (authorization alone is not sufficient; the dashboard/Lambda path could change, and patches are re-applied in the sandbox):
+   a. Run approved tests from a TRUSTED BASELINE: materialize test files, test config, and `package.json` scripts from `base_commit` (e.g. `git archive base_commit`), apply the patch, then restore/overlay the baseline copies of every trusted path before executing the approved argv. The command comes only from the contract's argv; resolve `npm run X` against the baseline `package.json`.
+   b. After applying the patch, compute the changed-path set from the sandbox result (not from the request) and emit a critical finding `TRUSTED_TEST_MODIFIED` ⇒ `decision: "block"` if any trusted path (same patterns as §4 Milestone 4, including `package.json` script/lifecycle keys and files named in approved argv) is created, modified, deleted, renamed, symlinked or mode-changed. Compare content hashes against the baseline as a second check.
+   c. Reuse `packages/contracts/fixtures/patch-vectors/trusted-tests.json` (`twinguard_expect` per vector). Dependency-only `package.json` changes remain `review_required` (PRD §13.2). Use finding code `TRUSTED_TEST_MODIFIED` (new finding code only; `findings[].code` is free-form in schema 0.1.0 — no schema change). Please confirm the code name.
+6. Still open from before: who serves `/api/impact/*`; list/search tools need per-result protected filtering; AgentCore mapping.
+
+**Do not edit** `packages/contracts/schemas/*` or the policy engine; propose changes in your handoff instead.
+
 ## 10. AWS Configuration
 | Service | State |
 |---|---|
@@ -167,25 +192,33 @@ Milestone 3 results (2026-11-07):
 - Frontend unchanged: typecheck, 8 vitest, build all pass.
 - **Cross-workstream (real):** checked out Person 2 `origin/codex/person2-execution-plane@8a93b37` read-only in a temporary worktree and ran `INTENTLOCK_PERSON1_CHECKOUT=<clean checkout of origin/Ali-Person-1@8064936> python3 -B -m pytest -q tests/sandbox` → **15 passed** (their MCP stdio subprocess → my real FastAPI on a localhost port: ALLOW, PROTECTED_PATH, RUN_NOT_ACTIVE; stop terminates a real subprocess). This is a synthetic harness, NOT live Kiro/model traffic. Worktrees removed afterwards; nothing of theirs modified.
 
+Milestone 4 results (2026-11-07), run in the project venv (`.venv`):
+- `.venv/bin/python -m pytest -q` → **234 passed, 7 skipped** (contract 29, policy 83, API+store+Lambda+launcher 122 passed / 1 skipped, integration all skipped without `INTENTLOCK_PERSON2_CHECKOUT`). Frontend: `tsc --noEmit` clean, 8 vitest, `vite build` OK.
+- **SYNTHETIC (stand-in processes, no Kiro, no LLM):** `apps/api/tests/test_launcher.py` (launch argv/env, stop → SIGINT, stubborn runner → SIGINT/SIGTERM/SIGKILL, blocked run terminates runner, exit 0 → completed / 3 → failed, runner-reported state not overwritten, spawn failure → failed + 502) on memory AND moto-mocked DynamoDB.
+- **REAL Person 2 code + SYNTHETIC agent brain:** `INTENTLOCK_PERSON2_CHECKOUT=<checkout of origin/codex/person2-execution-plane@8a93b37> pytest tests/integration` → 4 passed, 1 xpassed (the supervisor-defect test, intermittent), 1 skipped (REAL Kiro test). Chain: API launch endpoint → my launcher → Person 2's real `launch_kiro.py` + supervisor → a `kiro-cli` stand-in that reads the real generated profile and starts Person 2's real MCP server over stdio and sends scripted `tools/call` → my real `/internal/authorize`. Verified: allowed read reaches the file tool (`isError:false`, content withheld from the events); `.env` → `PROTECTED_PATH` (run `blocked`, denied calls returned only the reason code); replay → `RUN_NOT_ACTIVE`; supervisor registered the PID; SSE events identical (seq and event_id) to the list endpoint; clean exit → run `completed`; stop → state committed first, agent AND MCP server processes gone (one observation: 0.12 s; not an SLA); runner "Not logged in" failure → run `failed` with the intended log line.
+- **Dashboard in a real browser** (real API on :8787 + Vite on :5173, Person 2's real runner, synthetic kiro stand-in, `env -i` API process): fixture draft → Approve and launch → Active Run showed launcher RUNNING, agent PID registered by their supervisor, and the allowed MCP read live; Stop → STOPPED, launcher EXITED (code 1 — that run hit the intermittent Person 2 defect above), no agent/MCP processes left, events matched the backend.
+- **Cross-workstream (Person 2's suite on my branch):** see the last run noted at the end of this section.
+- NOT verified: anything with real Kiro (not installed here; Person 2 reports it is not logged in), safe/unsafe PATCH handling end-to-end (no sandbox/impact/promotion exists yet), real AWS.
+
 ## 12. Known Issues and Blockers
-- **No real-AWS verification** of DynamoDB, Lambda, IAM, or Bedrock (needs account/region/target confirmation from you).
-- moto does not model throttling/latency/true transaction contention; `append_event` retries up to 60 times on transaction conflicts then raises `StoreError` (fails closed).
-- Contract `status` is mutable by design (active→superseded); everything else in a version is immutable. `set_contract_status` is not conditional on the old status.
-- Run expiry is lazy (applied on access: authorize, GET run/events, SSE loop), no background reaper.
-- A stop landing after the final re-check but before the tool runs cannot be prevented by the control plane (inherent TOCTOU); the execution plane also polls run state.
-- Event details/`/internal/events` are sanitised heuristically; callers must not send contents/patches.
-- Public API has no authentication (hackathon demo). Dashboard: draft not persisted across reload; impact UI only verified against a stub.
-- `pip install` for boto3/moto/cfn-lint upgraded packages in the shared Anaconda environment on this machine (dependency warnings for streamlit/aiobotocore). Use a venv for further work.
-- `intentlock-prd.md` is not in the repo (shared root file; whoever adds it should tell the other).
+- **No real Kiro/model traffic has ever run.** Kiro CLI is not installed on this machine and Person 2 reports theirs is not logged in. The opt-in test `test_REAL_kiro_cli_traffic` (needs `INTENTLOCK_REAL_KIRO=1`, `kiro-cli` on PATH, logged in) is written but has NOT been run.
+- **No safe/unsafe patch end-to-end:** Person 2 has not implemented the sandbox, impact analysis or promotion. Only the authorization-layer rules (trusted tests, protected/allowed paths) are tested, with vectors ready for TwinGuard.
+- Person 2 supervisor defect (intermittent PermissionError in `terminate_group`) — see §9. Control-plane state/denials are unaffected (verified), but the supervisor may exit 1 and skip its lifecycle event.
+- The launcher is LOCAL-DEV only (a subprocess on the API host; registry in process memory; not available in Lambda/multi-process). The public launch endpoint is unauthenticated like the rest of the public API (demo); bind the API to localhost. Anyone who can reach it can start one agent per existing run.
+- **No real-AWS verification** of DynamoDB, Lambda, IAM, or Bedrock; nothing deployed; no AWS credentials or account were used (moto tests force fake credentials). Awaiting deployment account/region from you.
+- Contract `status` is mutable by design (active→superseded); everything else in a version is immutable. Run expiry is lazy. A stop landing after the final re-check but before a tool runs cannot be prevented by the control plane (inherent TOCTOU).
+- Trusted-test patterns are tuned for the frozen TypeScript/Node scope (a repo that keeps tests elsewhere needs the pattern list extended); a contract cannot opt out.
+- Dashboard: impact/approve/promote UI only exercised against a stub; draft not persisted across reload.
+- `intentlock-prd.md` is not in the repo.
+- Earlier global `pip install` upgraded packages in the shared Anaconda environment; all new dependencies now go into `.venv`.
 
 ## 13. Decisions Needed From Person 2
-1. Runner interface so the dashboard launch can start the Kiro/MCP agent for a `run_id` (§9 item 3).
-2. Who serves `/api/impact/*` (§9 earlier interface list) and whether control plane proxies it.
-3. Trusted test-catalogue rule so agent-editable files cannot weaken regression tests (§9 item 4).
-4. When ready: replace `apps/mcp-server/schemas` copies with canonical `packages/contracts` loading; merge strategy (PRs into `main`) — I have NOT merged anything.
+1. Confirm the §9 milestone-4 requirements (mission as prompt, supervisor fix, SIGTERM handling, `/state` reporting, TwinGuard trusted baseline + `TRUSTED_TEST_MODIFIED`).
+2. Who serves `/api/impact/*` (control plane proxy vs direct) and the approve/reject/promote bodies listed earlier.
+3. Replace `apps/mcp-server/schemas` copies with canonical `packages/contracts` loading; merge strategy (PRs into `main`) — I have NOT merged anything.
 
 ## 14. Next Steps
-1. Run the real cross-workstream MCP → `/internal/authorize` test (Person 2's branch exists) and fix any mismatch.
-2. With your confirmation of AWS account/region/stack: deploy `template.yaml`, run the real-table store tests, invoke the Lambda for real, then CloudWatch metrics.
-3. Real Bedrock verification (model access + `INTENTLOCK_BEDROCK_MODEL_ID`), then the runner/launch wiring and impact endpoints once Person 2 serves them.
+1. Get Kiro installed and logged in, then run the real tests: `INTENTLOCK_REAL_KIRO=1 INTENTLOCK_PERSON2_CHECKOUT=<p2> pytest tests/integration -k REAL` and a manual dashboard run; this is the only way to claim real CLI-agent traffic.
+2. Person 2: sandbox + impact analysis + promotion with the trusted-baseline rule; then wire `/api/impact/*`, approve/promote and the final audit with real data.
+3. With your deployment account/region: deploy the template, run the real-table store tests and invoke the Lambda; then CloudWatch metrics and real Bedrock verification.
 

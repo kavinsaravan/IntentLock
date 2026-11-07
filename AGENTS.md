@@ -26,7 +26,7 @@ Peek at the other branch safely: `git fetch origin && git show origin/<their-bra
 Canonical contract = JSON Schemas in `packages/contracts/schemas/` (version in `packages/contracts/VERSION`, currently `0.1.0`) + fixtures in `packages/contracts/fixtures/`. Python (Pydantic) and the execution plane both validate against them. Never make an incompatible change without agreement from both people; document the proposal in your handoff.
 
 ## Testing
-Run relevant tests before calling anything done: `python3 -m pytest -q`. Never report unverified functionality as working; label mocked/local-fallback pieces as such.
+Run relevant tests before calling anything done. Use the project virtualenv, never a shared/global Python environment: `python3 -m venv .venv && .venv/bin/pip install -r apps/api/requirements-dev.txt && .venv/bin/python -m pytest -q`. Never report unverified functionality as working; label mocked/local-fallback pieces as such.
 
 ## Security requirements
 - Never expose or log secrets, file contents, tokens, or full patches.

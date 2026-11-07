@@ -1,4 +1,4 @@
-import type { Contract, ContractDraft, EventRec, Health, ImpactReport, Run } from "./types";
+import type { Contract, ContractDraft, EventRec, Health, ImpactReport, LauncherInfo, LaunchStatus, Run } from "./types";
 
 // Empty in dev => same-origin via the Vite proxy. Set VITE_API_URL for a deployed API.
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? "";
@@ -62,6 +62,11 @@ export const api = {
     call<{ events: EventRec[] }>(`/api/runs/${encodeURIComponent(id)}/events?after_seq=${afterSeq}`),
   streamUrl: (id: string, afterSeq = 0) =>
     `${API_BASE}/api/runs/${encodeURIComponent(id)}/events/stream?after_seq=${afterSeq}`,
+
+  launcherInfo: () => call<LauncherInfo>("/api/launcher"),
+  launchAgent: (id: string) => call<{ launched: boolean; launcher_pid: number }>(
+    `/api/runs/${encodeURIComponent(id)}/launch`, { method: "POST" }),
+  launchStatus: (id: string) => call<LaunchStatus>(`/api/runs/${encodeURIComponent(id)}/launch`),
 
   // --- Execution-plane / TwinGuard interfaces (NOT implemented by this backend yet). ---
   // Expected shapes are documented in docs/handoffs/person1-control-plane.md.

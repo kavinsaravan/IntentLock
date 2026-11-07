@@ -9,6 +9,7 @@ Evaluation order (PRD 12):
  7-8 canonical paths       9 protected paths      10 allowed paths
 11 approved test id       12 call/time limits     13-14 caller records + invokes
 """
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,23 @@ from .paths import (
 # Always protected, regardless of what the contract says (a contract can only
 # ADD protection, never remove it). Slash-less => matches at any depth.
 BASELINE_PROTECTED = (".git", ".env*")
+
+# Test infrastructure the agent may READ but never CHANGE (create/modify/delete/rename): TwinGuard judges a
+# patch with these, so an agent-submitted patch must not be able to weaken them. Applies to propose_patch
+# only; protected-path precedence and allowed-path rules still apply first. Case-insensitive; slash-less
+# patterns match at any depth. Enforced again by TwinGuard (see docs/handoffs/person1-control-plane.md §9).
+TRUSTED_TEST_PATTERNS = (
+    "tests/**", "test/**", "__tests__/**", "**/tests/**", "**/test/**", "**/__tests__/**",
+    "*.test.*", "*.spec.*", "jest.config.*", "vitest.config.*", ".mocharc*", "jest.setup.*", "setupTests.*",
+)
+# package.json keys whose changes can weaken the regression suite or run code at install time.
+TRUSTED_SCRIPT_NAMES = frozenset({
+    "scripts", "install", "preinstall", "postinstall", "prepare", "prepublish", "prepublishonly",
+    "pretest", "test", "posttest", "jest", "mocha", "vitest", "ava", "nyc", "c8",
+})
+_PKG_RUNNERS = {"npm", "pnpm", "yarn"}
+_KEY_RX = re.compile(r'"([^"]+)"\s*:')
+_FILE_OPS = ("deleted file mode", "new file mode", "rename from", "rename to", "copy from", "copy to")
 
 # No direct repository effect; allowed for any active run (still counted and
 # argument-validated). Documented in docs/handoffs/person1-control-plane.md.
@@ -215,6 +233,54 @@ def _check_paths(prot_paths: list[str], need_paths: list[str], contract: Mission
             raise _Deny("PATH_NOT_ALLOWED", {"requested_path": p})
 
 
+def _approved_test_footprint(contract: MissionContract) -> tuple[set[str], set[str]]:
+    """(package.json script names, repo-relative file paths) referenced by approved test argv."""
+    scripts: set[str] = set()
+    files: set[str] = set()
+    for t in contract.approved_tests.values():
+        argv = t.argv
+        if argv and argv[0] in _PKG_RUNNERS:
+            rest = argv[1:]
+            if rest[:1] in (["run"], ["run-script"]) and len(rest) > 1:
+                scripts.add(rest[1].lower())
+            elif rest[:1] == ["test"] or rest[:1] == ["t"]:
+                scripts.add("test")
+            elif rest and not rest[0].startswith("-"):
+                scripts.add(rest[0].lower())      # yarn <script>
+        for a in argv[1:] if argv else []:
+            if not a.startswith("-") and ("/" in a or a.endswith((".js", ".mjs", ".cjs", ".ts", ".sh", ".py", ".json"))):
+                try:
+                    files.add(canonicalize_path(a))
+                except PathError:
+                    pass
+    scripts |= {f"pre{n}" for n in list(scripts)} | {f"post{n}" for n in list(scripts)}
+    return scripts, files
+
+
+def _check_trusted_tests(patch: str, paths: list[str], contract: MissionContract) -> None:
+    """A patch may not create/modify/delete/rename test infrastructure (see TRUSTED_TEST_PATTERNS)."""
+    scripts, files = _approved_test_footprint(contract)
+    for p in paths:
+        for rule in TRUSTED_TEST_PATTERNS:
+            if matches_protected(rule, p):
+                raise _Deny("PATH_NOT_ALLOWED", {"requested_path": p, "matched_rule": rule, "rule": "TRUSTED_TEST_READ_ONLY"})
+        if p in files:
+            raise _Deny("PATH_NOT_ALLOWED", {"requested_path": p, "matched_rule": "approved_test_argv",
+                                              "rule": "TRUSTED_TEST_READ_ONLY"})
+    if any(p == "package.json" or p.endswith("/package.json") for p in paths):
+        lines = patch.split("\n")
+        if any(l.startswith(_FILE_OPS) for l in lines):
+            raise _Deny("PATH_NOT_ALLOWED", {"requested_path": "package.json", "matched_rule": "package.json file operation",
+                                              "rule": "TRUSTED_TEST_READ_ONLY"})
+        for l in lines:
+            if l[:1] in ("+", "-") and not l.startswith(("+++", "---")):
+                for key in _KEY_RX.findall(l):
+                    k = key.lower()
+                    if k in TRUSTED_SCRIPT_NAMES or k in scripts or k.startswith("test"):
+                        raise _Deny("PATH_NOT_ALLOWED", {"requested_path": "package.json", "matched_rule": f"script:{key[:40]}",
+                                                          "rule": "TRUSTED_TEST_READ_ONLY"})
+
+
 # --------------------------------------------------------------------------
 # Main entry point
 # --------------------------------------------------------------------------
@@ -261,6 +327,8 @@ def _evaluate(raw_request: Any, run: Run | None, contract: MissionContract | Non
 
     # 9-10. protected, then allowed
     _check_paths(prot_paths, need_paths, contract)
+    if req.tool == "propose_patch":  # approved tests must come from a trusted baseline, never from the patch
+        _check_trusted_tests(req.arguments["patch"], need_paths, contract)
 
     # 12. limits
     if prior_tool_calls >= contract.limits.max_tool_calls:

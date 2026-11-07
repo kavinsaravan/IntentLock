@@ -41,6 +41,9 @@ function Form({ state }: { state: DraftState }) {
       const c = created ?? await api.createContract({ draft: build(), approved: true, approved_by: approver });
       setCreated(c);
       const run = await api.createRun({ contract_id: c.contract_id, contract_version: c.version });
+      // Ask the control plane to start the execution plane's runner. Failure here is NOT hidden: the
+      // Active Run screen shows the backend's real launcher state and offers a manual launch.
+      await api.launchAgent(run.run_id).catch(() => undefined);
       location.hash = `#/runs/${run.run_id}`;
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Unexpected error");
@@ -107,7 +110,7 @@ function Form({ state }: { state: DraftState }) {
         </div>
         {created && <p className="muted">Contract <code>{created.contract_id}</code> v{created.version} is active. Run creation failed; retry will reuse it.</p>}
         {error && <Notice tone="error" title="Could not approve / launch">{error}</Notice>}
-        <p className="muted">Launching creates the control-plane run. The coding agent itself is started by the execution plane and attaches to this run.</p>
+        <p className="muted">Launching creates the control-plane run and asks the configured execution-plane runner to start the real CLI agent for it. The Active Run screen shows whether that actually happened.</p>
       </Card>
     </>
   );

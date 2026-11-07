@@ -66,3 +66,9 @@ export interface ImpactReport {
 }
 
 export interface Health { status: string; schema_version: string; store: string }
+
+export interface LauncherInfo { configured: boolean; mode: string | null; detail: string | null }
+export interface LaunchStatus {
+  launched: boolean; launcher_pid?: number; alive?: boolean; exit_code?: number | null;
+  started_at?: string; escalation?: string[];
+}

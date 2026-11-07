@@ -15,6 +15,7 @@ from intentlock_policy.models import MissionContract, MissionContractDraft, Run
 from intentlock_policy.redact import sanitize_details
 
 from . import service
+from .launcher import AgentLauncher, AlreadyLaunched, LaunchError, LauncherNotConfigured
 from .bedrock import ProposalError, bedrock_invoker, propose_draft
 from .store import ContractExists, StoreError, create_store_from_env, now
 
@@ -70,10 +71,11 @@ class IngestEventBody(BaseModel):
     details: dict[str, Any] | None = None
 
 
-def create_app(store: Any = None,
+def create_app(store: Any = None, launcher: Any = None,
                invoker: Callable[[str, str], str] | None = None,
                internal_token: str | None = None) -> FastAPI:
     store = store if store is not None else create_store_from_env()
+    launcher = launcher if launcher is not None else AgentLauncher(store)
     token = internal_token if internal_token is not None else os.environ.get("INTENTLOCK_INTERNAL_TOKEN", "")
     app = FastAPI(title="IntentLock control plane", version=SCHEMA_VERSION)
     origins = os.environ.get("INTENTLOCK_CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -176,8 +178,11 @@ def create_app(store: Any = None,
         run = stop_run_state(run_id, "stopped", (body.reason if body else "stopped by user"))
         # State is committed above. Process termination is performed by the execution
         # plane (it sees stop_run / RUN_NOT_ACTIVE and run status) - not claimed here.
+        st = launcher.status(run_id)
         return {"run": run.model_dump(mode="json"), "state_committed": True,
-                "process_termination": "delegated_to_execution_plane"}
+                "process_termination": ("launcher_watcher_armed" if st.get("launched") and st.get("alive")
+                                        else "launcher_already_exited" if st.get("launched")
+                                        else "delegated_to_execution_plane")}
 
     @app.get("/api/runs/{run_id}/events")
     def list_events(run_id: str, after_seq: int = Query(0, ge=0)) -> dict:
@@ -206,6 +211,37 @@ def create_app(store: Any = None,
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache"})
+
+    # ------------------------------------------------------- agent launch
+    @app.get("/api/launcher")
+    def launcher_info() -> dict:
+        return launcher.info()
+
+    @app.post("/api/runs/{run_id}/launch", status_code=201)
+    def launch_agent(run_id: str) -> dict:
+        run = get_run_or_404(run_id)
+        if run.status != "active":
+            raise HTTPException(409, "RUN_NOT_ACTIVE")
+        contract = store.get_contract(run.contract_id, run.contract_version)
+        if contract is None or contract.status != "active":
+            raise HTTPException(409, "CONTRACT_NOT_ACTIVE")
+        try:
+            rec = launcher.launch(run, contract)
+        except LauncherNotConfigured as e:
+            raise HTTPException(503, f"AGENT_LAUNCHER_NOT_CONFIGURED: {e}") from e
+        except AlreadyLaunched as e:
+            raise HTTPException(409, "ALREADY_LAUNCHED") from e
+        except LaunchError as e:
+            service.stop_run_state(store, run_id, "failed", f"agent launch failed: {e}", lambda: now())
+            raise HTTPException(502, f"AGENT_LAUNCH_FAILED: {e}") from e
+        store.append_event(run_id, event_type="agent_event", status="recorded", message="Agent launcher started",
+                           details={"launcher_pid": rec.process.pid, "mode": "local-subprocess"})
+        return {"launched": True, "launcher_pid": rec.process.pid}
+
+    @app.get("/api/runs/{run_id}/launch")
+    def launch_status(run_id: str) -> dict:
+        get_run_or_404(run_id)
+        return launcher.status(run_id)
 
     # ---------------------------------------------------------- internal
     @app.post("/internal/authorize")
