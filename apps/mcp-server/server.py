@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 MAX_FILE = 65536
 
 from control_plane import Client, Denied
+from twinguard import preview
 
 class Repository:
     """Reads regular files without following symlinks, including intermediate ones."""
@@ -51,7 +52,9 @@ class Repository:
             return data.decode('utf-8')
 
 TOOLS = [{'name': 'read_file', 'description': 'Read an authorized repository-relative UTF-8 file, at most 64 KiB.',
-          'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False}}]
+          'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False}},
+         {'name':'propose_patch','description':'Preview an authorized unified Git patch in TwinGuard without modifying the protected repository.',
+          'inputSchema':{'type':'object','properties':{'patch':{'type':'string'}},'required':['patch'],'additionalProperties':False}}]
 
 class Server:
     def __init__(self, repository, authorize, run_id, contract_id, version):
@@ -70,13 +73,21 @@ class Server:
             raise Denied('METHOD_NOT_FOUND')
         params = message.get('params', {})
         args = params.get('arguments', {})
-        if params.get('name') != 'read_file' or not isinstance(args, dict) or set(args) != {'path'} or not isinstance(args['path'], str):
+        tool = params.get('name')
+        if not isinstance(args, dict) or (tool == 'read_file' and (set(args) != {'path'} or not isinstance(args['path'], str))) or (tool == 'propose_patch' and (set(args) != {'patch'} or not isinstance(args['patch'], str))) or tool not in ('read_file','propose_patch'):
             raise Denied('INVALID_ARGUMENTS')
         envelope = {'request_id': str(uuid.uuid4()), 'run_id': self.run_id, 'contract_id': self.contract_id,
-                    'contract_version': self.version, 'agent_id': 'kiro-cli', 'tool': 'read_file',
+                    'contract_version': self.version, 'agent_id': 'kiro-cli', 'tool': tool,
                     'arguments': args, 'timestamp': datetime.now(timezone.utc).isoformat()}
         self.authorize(envelope)
-        return {'content': [{'type': 'text', 'text': self.repository.read(args['path'])}], 'isError': False}
+        if tool == 'read_file':
+            result=self.repository.read(args['path'])
+        else:
+            try:
+                result=json.dumps(preview(Client.from_env(), self.repository.root, self.run_id, self.contract_id, self.version, args['patch']))
+            except Exception:
+                raise Denied('IMPACT_BLOCKED') from None
+        return {'content': [{'type': 'text', 'text': result}], 'isError': False}
 
     def serve(self):
         while True:
