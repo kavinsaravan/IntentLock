@@ -226,8 +226,10 @@ Open issues not resolvable by me: (a) intermittent macOS `os.killpg` `Permission
 | Item | State (2026-11-07) |
 |---|---|
 | AWS CLI | Installed (`aws-cli/2.36.40`). |
-| Profile `intentlock` | **Exists** (region `us-east-1`, output `json`) but the stored access key id is only 4 characters (`AKIA`, truncated entry), so `sts get-caller-identity` fails with `InvalidClientTokenId`. Owner must re-run `aws configure --profile intentlock` and type the FULL 20-character key id (do not press Enter on the prefilled `[AKIA]`). All further AWS calls are on hold until identity succeeds. |
-| Identity / account / username match, service access, Bedrock model | **Not verified** until the profile exists. `infrastructure/control-plane/verify_aws_readonly.sh` is ready (read-only; checks identity, DynamoDB, Lambda, S3, CloudFormation incl. `validate-template`, CloudWatch/Logs, Bedrock listing, name conflicts, budgets, IAM simulation; never invokes a model). |
+| Profile `intentlock` | **Configured and working** (region `us-east-1`, output `json`; key id 20 chars, secret 40 chars; values never read or stored in the repo). The unrelated `default` profile was not used. |
+| Identity | **VERIFIED:** `sts get-caller-identity --profile intentlock` → account `247495661854` (matches), IAM user `aparpia` (matches), principal type user, region `us-east-1`. |
+| Service access (DynamoDB, Lambda, S3, CloudFormation, CloudWatch/Logs, Bedrock, Budgets, IAM simulate) | **ALL `AccessDenied`.** `verify_aws_readonly.sh`: 2 passed (identity), 13 failed. The user has no usable permissions yet. Missing permissions are exactly those in `infrastructure/control-plane/iam/01-readonly-verification.json` (reads) and `02-deploy-control-plane.json` (deploy); Kavin must review/attach them (Person 1 does not change IAM). Until then: stack/resource-name conflicts, Lambda quota and Bedrock model availability are UNKNOWN. |
+| Bedrock model | Not chosen; listing denied; nothing invoked. |
 | Nothing deployed | No AWS resource has been created, changed or deleted. Earlier read-only checks used the unrelated `default` profile and do not describe the shared account. |
 | Template | `cfn-lint` clean; resources now tagged `Project=IntentLock`, `Owner=person1-control-plane`. Not deployed. |
 | Tests vs AWS | All tests use fake credentials / moto; no test can reach real AWS (see §11). |
@@ -302,7 +304,7 @@ Milestone 6 results (2026-11-07):
 **Person 2:** confirm the TwinGuard contract (§9: `/internal/impact`, artifact location, `/promote`, `TRUSTED_TEST_MODIFIED`); fix/confirm the open runner items; promoter must recheck run state before applying (an in-flight promotion cannot be cancelled by the control plane); replace `apps/mcp-server/schemas` copies with canonical loading.
 
 ## 14. Next Steps
-1. **Person 2 / Kavin:** TwinGuard sandbox, impact analyzer and promoter against the §9 contract (submit to `/internal/impact`, write the artifact, `POST /promote`, `TRUSTED_TEST_MODIFIED`); call `/internal/runs/{id}/state`; fix the `killpg`/SIGTERM issues; run the combined dashboard→real Kiro procedure (`tests/integration/README.md`) and inspect tool exposure. Set `INTENTLOCK_REVIEWER_TOKENS` (strong, unique tokens) when running the API.
-2. **Owner:** create the `intentlock` profile privately, then identity check + `verify_aws_readonly.sh`; decide Bedrock model, Lambda-zip bucket, $25 budget; explicitly approve any deploy. Kavin must deactivate the exposed key first.
-3. **Person 1:** once real impact reports exist, replace simulated data end to end; measure `/internal/authorize` latency against real DynamoDB before the demo; optional hardening (rate limiting on review endpoints/proposal endpoint, token rotation).
-
+1. **Kavin (account owner):** review and attach `infrastructure/control-plane/iam/01-readonly-verification.json` and `02-deploy-control-plane.json` to IAM user `aparpia` (or tell Person 1 to deploy a different way); confirm the exposed key is deactivated.
+2. **Person 1:** re-run `LIST_MODELS=1 CODE_BUCKET=<name> PROFILE=intentlock EXPECTED_USER=aparpia EXPECTED_ACCOUNT=247495661854 infrastructure/control-plane/verify_aws_readonly.sh`; resolve remaining FAILs; confirm name conflicts, quota and a Bedrock model.
+3. **Owner decisions then explicit approval:** Bedrock model id, Lambda-zip bucket (`intentlock-code-247495661854-us-east-1`), $25 budget alert, then deploy `intentlock-control-plane-dev` (no deploy until approved).
+4. **Person 2 / Kavin:** TwinGuard/promoter per §9; real-Kiro run; set `INTENTLOCK_REVIEWER_TOKENS`.

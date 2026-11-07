@@ -104,3 +104,13 @@ or expose these endpoints over plaintext HTTP outside localhost. The existing
 `INTENTLOCK_REVIEWERS` list can further restrict which authenticated reviewers
 may act. A stopped run blocks approval and promotion; an already started promoter
 must separately verify current run state before applying a patch.
+
+## Verified 2026-11-07 with profile `intentlock` (read-only) — IAM permissions are MISSING
+- **Identity verified:** account `247495661854` (matches the shared account), IAM user `aparpia`, region `us-east-1`.
+- **Service access: none.** `verify_aws_readonly.sh` (13 of 15 checks FAIL, both identity checks PASS) got `AccessDenied(Exception)` for every call: DynamoDB `ListTables`/`DescribeLimits`, Lambda `GetAccountSettings`/`ListFunctions`, S3 `ListAllMyBuckets`, CloudFormation `ListStacks`/`ValidateTemplate`, Logs `DescribeLogGroups`, CloudWatch `ListMetrics`, Bedrock `ListFoundationModels`/`ListInferenceProfiles`, Budgets, and `iam:SimulatePrincipalPolicy`. So: whether `intentlock-control-plane-dev` or the planned names already exist, which Bedrock models are available, and the Lambda quota are all UNKNOWN. The user currently appears to have no attached policy granting these actions.
+- **Fix (needs the account owner, Kavin; Person 1 does not and will not change IAM):** review and attach, to user `aparpia`, the two least-privilege managed policies in `iam/`:
+  - `iam/01-readonly-verification.json` — list/describe reads for the checks above plus self-simulation; no write actions, no model invocation.
+  - `iam/02-deploy-control-plane.json` — create/update/delete only for stack `intentlock-control-plane-dev`, table `intentlock-control-plane`, function `intentlock-authorizer`, its log group, IAM roles/policies prefixed `intentlock-control-plane-dev-` (with `iam:PassRole` limited to Lambda), the Lambda-zip bucket `intentlock-code-247495661854-us-east-1`, and an optional `intentlock-*` budget. All scoped to account `247495661854` / `us-east-1` where the service is regional.
+  - Bedrock `InvokeModel` is deliberately NOT included (billable); add it only after a model is chosen and approved. Alternatively Kavin can deploy the stack himself with his own credentials.
+  - `DeleteTable` is included so a failed first deploy can roll back cleanly; remove it if you prefer tables never be deleted by this user.
+After attaching, re-run: `LIST_MODELS=1 CODE_BUCKET=<name> PROFILE=intentlock EXPECTED_USER=aparpia EXPECTED_ACCOUNT=247495661854 infrastructure/control-plane/verify_aws_readonly.sh`.

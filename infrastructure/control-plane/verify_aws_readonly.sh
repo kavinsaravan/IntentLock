@@ -53,7 +53,11 @@ run "bedrock ListFoundationModels (no invoke)" "${A[@]}" bedrock list-foundation
 if [ -n "${INTENTLOCK_BEDROCK_MODEL_ID:-}" ]; then
   run "bedrock model availability"  "${A[@]}" bedrock get-foundation-model-availability --model-id "$INTENTLOCK_BEDROCK_MODEL_ID"
 fi
-echo "  stack '$STACK':   $("${A[@]}" cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>&1 | grep -q 'does not exist' && echo 'does not exist (expected before first deploy)' || echo 'EXISTS or not queryable (inspect before deploying)')"
+STK="$("${A[@]}" cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>&1)"
+case "$STK" in *"does not exist"*) echo "  stack '$STACK': does not exist (expected before first deploy)";;
+               *AccessDenied*) echo "  stack '$STACK': UNKNOWN (AccessDenied: cannot tell whether it exists)";;
+               *"An error occurred"*|*ERROR*) echo "  stack '$STACK': UNKNOWN ($(printf '%s' "$STK" | err))";;
+               *) echo "  stack '$STACK': EXISTS with status $STK (inspect before deploying)";; esac
 
 echo "== Resource-name conflicts (read-only; each should be 'free' before first deploy)"
 name_free() { # label, then a command whose failure message should contain a not-found code
@@ -63,7 +67,9 @@ name_free() { # label, then a command whose failure message should contain a not
 name_free "table intentlock-control-plane" "${A[@]}" dynamodb describe-table --table-name intentlock-control-plane
 name_free "lambda intentlock-authorizer"   "${A[@]}" lambda get-function --function-name intentlock-authorizer
 LG="$("${A[@]}" logs describe-log-groups --log-group-name-prefix /aws/lambda/intentlock-authorizer --query 'length(logGroups)' --output text 2>&1)"
-[ "$LG" = "0" ] && res "log group /aws/lambda/intentlock-authorizer" ok "free" || res "log group /aws/lambda/intentlock-authorizer" fail "exists or cannot tell"
+if [ "$LG" = "0" ]; then res "log group /aws/lambda/intentlock-authorizer" ok "free"
+elif printf '%s' "$LG" | grep -q AccessDenied; then res "log group /aws/lambda/intentlock-authorizer" fail "cannot tell: AccessDenied"
+else res "log group /aws/lambda/intentlock-authorizer" fail "EXISTS ($LG)"; fi
 if [ -n "${CODE_BUCKET:-}" ]; then
   out="$("${A[@]}" s3api head-bucket --bucket "$CODE_BUCKET" 2>&1)" && res "code bucket $CODE_BUCKET" ok "exists and is accessible" || {
     case "$out" in *404*|*NotFound*) echo "  NOTE  bucket $CODE_BUCKET not found: create it before uploading the Lambda zip (names are global);";;
