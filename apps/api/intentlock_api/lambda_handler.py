@@ -21,6 +21,9 @@ from typing import Any
 from .service import authorize_request, error_decision
 from .store import StoreError, create_store_from_env
 
+# The Lambda Python runtime leaves the root logger at WARNING, which would silently drop the INFO audit lines
+# (intentlock.audit) from CloudWatch. Enable INFO for our own loggers only.
+logging.getLogger("intentlock").setLevel(logging.INFO)
 log = logging.getLogger("intentlock.lambda")
 _store = None
 

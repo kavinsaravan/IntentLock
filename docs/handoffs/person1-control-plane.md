@@ -196,20 +196,21 @@ Read from `origin/codex/person2-execution-plane@8a93b37` (unchanged since last c
 | 6 | Only `read_file` exposed; list/search/propose_patch/run_approved_test pending | OPEN (list/search need per-result protected filtering) |
 | 7 | TwinGuard sandbox, impact analyzer, patch promoter | NOT IMPLEMENTED (contract above is waiting on them) |
 
+### Update 2026-11-07 (late): Person 2's latest state and the safeguards branch
+- `origin/kavinperson2branch@7205a3d`: only the handoff changed since `3847418`; it now acknowledges `/internal/runs/{id}/state` and the dashboard launch, and reports REAL Kiro 3.1 MCP traffic on their machine (one ALLOW for `src/auth/session.ts`, then `PROTECTED_PATH` for `.env`). Kavin owns all Kiro work; Person 1 does not run Kiro.
+- **`origin/codex/ali-review-safeguards@8026498`** (made by Person 2's side, based on `a92b199`, edits Person-1-owned files): reviewer-specific tokens (`INTENTLOCK_REVIEWER_TOKENS`, JSON name→token, header `X-IntentLock-Reviewer-Token`, constant-time compare) required for approve/reject/promote (401 `REVIEWER_NOT_AUTHENTICATED`, fail-closed `REVIEW_AUTH_NOT_CONFIGURED` when none are configured); runs in status `stopped` become ineligible for approval/promotion (previously only `blocked`/`failed`); dashboard asks for the token. **My review (read-only): the change is correct and closes the "self-asserted reviewer" gap I documented; its own tests pass (175 in impact+policy+contract, run in a separate worktree); a dry-run merge conflicts only in `infrastructure/control-plane/README.md` (docs).** I have NOT merged it (no authorization from the owner; Person 2's handoff asking for the merge is not authorization). Awaiting the owner's decision. Note it means a stopped run's patch can no longer be approved.
+
 ## 10. AWS Configuration
-Target: region `us-east-1`; stack `intentlock-control-plane-dev`; CLI profile `intentlock`; IAM user `aparpia`. **No credentials, keys or secrets are stored in this repo or this file.**
+**One shared AWS account** (owned by Kavin): account `247495661854`, region `us-east-1`, IAM user `aparpia`, CLI profile `intentlock`, single environment. Stacks: Person 1 `intentlock-control-plane-dev`; Person 2 (proposed) `intentlock-execution-plane-dev`. Ownership/naming table: `infrastructure/control-plane/README.md` ("ONE shared AWS account"). **No credentials are stored in this repo or this file** (tracked files and full history scanned clean). The previously exposed access key must be deactivated by Kavin and never reused. The unrelated `default` profile is never used.
 | Item | State (2026-11-07) |
 |---|---|
 | AWS CLI | Installed (`aws-cli/2.36.40`). |
-| Profile `intentlock` | **Does NOT exist** on this machine (only `default`). Owner must run `aws configure --profile intentlock` privately; then `infrastructure/control-plane/verify_aws_readonly.sh`. |
-| Identity under `intentlock` | **Not verified** (profile missing). |
-| `default` profile (for information) | IAM user `aparpia@scu.edu`, account `****8656`, profile region `us-west-1`. This is NOT the `aparpia` user and is not confirmed to be the shared hackathon account. **My earlier read-only checks (DynamoDB list, stack/function lookups, Lambda limit 10, Bedrock listing) ran with this profile, so they describe that account only.** No further AWS calls were made after discovering this. |
-| Shared hackathon account id | Unknown to me — the owner must supply it (`EXPECTED_ACCOUNT`) so the script can confirm a match. |
-| DynamoDB / Lambda / S3 / Bedrock / CloudFormation / CloudWatch access under `intentlock` | **Not verified** (no profile). Script ready; deploy-time permissions can only be fully confirmed by deploying (IAM simulation is partial evidence). |
-| Store/Lambda/Bedrock region handling | Fixed: one `aws_region()` helper, default `us-east-1` (was: ambient profile region for DynamoDB). Test added. |
-| Template (`template.yaml`) | `cfn-lint` clean; `validate-template` not yet run against real CloudFormation (script does it). Not deployed. |
-| Moto (mocked AWS) tests | Pass; unchanged. Real-AWS tests: not run. |
-Readiness, costs, missing components, env vars: `infrastructure/control-plane/README.md` ("Deployment readiness").
+| Profile `intentlock` | **Still does NOT exist** on this machine (re-checked after Kavin's clarification). Owner must run `aws configure --profile intentlock` privately (replacement key; region `us-east-1`; output `json`). |
+| Identity / account / username match, service access, Bedrock model | **Not verified** until the profile exists. `infrastructure/control-plane/verify_aws_readonly.sh` is ready (read-only; checks identity, DynamoDB, Lambda, S3, CloudFormation incl. `validate-template`, CloudWatch/Logs, Bedrock listing, name conflicts, budgets, IAM simulation; never invokes a model). |
+| Nothing deployed | No AWS resource has been created, changed or deleted. Earlier read-only checks used the unrelated `default` profile and do not describe the shared account. |
+| Template | `cfn-lint` clean; resources now tagged `Project=IntentLock`, `Owner=person1-control-plane`. Not deployed. |
+| Tests vs AWS | All tests use fake credentials / moto; no test can reach real AWS (see §11). |
+Readiness, costs, $25 budget recommendation, least-privilege and public-endpoint reviews: `infrastructure/control-plane/README.md`.
 
 ## 11. Tests and Verification
 - `python3 -m pytest -q` → **116 passed** (contract 29, policy 66, API 21). Executed 2026-11-07. Added: expiry-before-denial (incl. invalid-args request on expired run), plain-GET expiry, `Last-Event-ID` resume, `request_permission`/`finish_task` conditionality (run state, contract state/version, limits, arguments).
@@ -246,6 +247,11 @@ Milestone 5 results (2026-11-07), project venv:
 - **Real Kiro:** NOT run by me (Kiro not installed here). Person 2's own report of real Kiro traffic is against commit `1bfd0ff`.
 - **AWS (read-only, us-east-1):** see `infrastructure/control-plane/README.md`. Nothing created.
 
+Update 2026-11-07 (late):
+- `.venv/bin/python -m pytest` → **301 passed, 7 skipped** in one normal run (7 skips: 6 integration tests that need `INTENTLOCK_PERSON2_CHECKOUT` + real-Kiro test, and the memory-store secret scan). Frontend unchanged (tsc/vitest/build last verified at `055ebb9`).
+- **Tests can no longer reach real AWS:** `apps/api/tests/conftest.py` forces fake static credentials, empty config/credentials files and disabled instance-metadata for the whole session (unless `INTENTLOCK_AWS_TEST_TABLE` is explicitly set); `test_no_real_aws.py` asserts credentials resolve to the fakes and no profiles are visible. The `AgentLauncher` now has `shutdown()` (kills runners, joins watcher threads; watchers never touch the store after it), and the launcher tests/e2e call it before the mocked store is torn down. Reason: a watcher thread that outlived its moto mock could otherwise call boto3 with ambient credentials.
+- **UNRESOLVED intermittent failure:** `apps/api/tests/test_api.py::test_tool_limit_is_exact_under_concurrent_requests[dynamodb-moto]` (12 threads call `service.authorize_request` on mocked DynamoDB with `max_tool_calls=5`; expects exactly 5 allows, 7 `TOOL_CALL_LIMIT_EXCEEDED`, 12 gap-free events). Observed failing about 1 run in 9–10 when run together with `test_launcher.py`/the full suite (3 failures seen overall, one of which had an extra pytest warning, possibly an unhandled thread exception — unconfirmed); 0 failures in 25 isolated runs, 0 in 40 iterations of a standalone stress script, and none in the last full runs. **The failure message was never captured** (output lost twice), so the root cause is unidentified. Suspects: `append_event` transaction-conflict retries exhausting under CPU load (raises `StoreError`, i.e. fails closed), moto thread-safety, or interference from other threads. Evidence of over-allowing: none (every exception path in the service denies/raises; the test asserts exactness). I judged it not security-critical and stopped investigating by owner instruction; the diagnostics scripts are preserved in the session scratchpad. The test now includes thread exceptions and counts in its assertion message so the next occurrence explains itself. If it recurs, capture with `-p no:cacheprovider --tb=long -W error::pytest.PytestUnhandledThreadExceptionWarning`.
+
 ## 12. Known Issues and Blockers
 - **No dashboard→real-Kiro run yet.** Kiro is not installed/authenticated on this machine; the procedure and an opt-in test exist (`tests/integration/README.md`). Person 2's real-Kiro result predates the launcher integration.
 - **TwinGuard/promoter do not exist** (Person 2): impact reports, patches and promotion in my tests are simulated. Real exact-patch promotion, safe/unsafe patch handling and `TRUSTED_TEST_MODIFIED` enforcement are unverified end to end.
@@ -257,15 +263,20 @@ Milestone 5 results (2026-11-07), project venv:
 - Trusted-test patterns are tuned for the frozen TypeScript/Node scope.
 - Disk pressure: the dev machine's volume was at 99% during this session (a transient ENOSPC aborted one command). `.venv` (~280 MB) and `apps/web/node_modules` (~70 MB) are regenerable.
 - `intentlock-prd.md` is not in the repo (Person 2 gitignored their local copy).
+- **AWS access is unverified** until the `intentlock` profile exists; no deploy is possible before that. The exposed-key rotation (Kavin) must happen first.
+- Public API is unauthenticated (see README list); do not expose beyond localhost; Bedrock proposal endpoint has no rate limit.
+- Template has no S3 bucket; the Lambda zip bucket and Bedrock model id are open decisions.
 
-## 13. Decisions Needed From Person 2
-1. Confirm or counter-propose the TwinGuard contract in §9 (`POST /internal/impact`, artifact location, `POST /promote` request/response, `TRUSTED_TEST_MODIFIED`).
-2. Fix/confirm the open runner items (killpg PermissionError, SIGTERM handler, mission as prompt, call `/internal/runs/{id}/state`).
-3. Kavin owns ALL real-Kiro work: run the real-Kiro procedure against the combined app and inspect tool exposure interactively (Person 1 will not run Kiro).
-4. Replace `apps/mcp-server/schemas` copies with canonical loading; merge strategy via reviewed PRs — I have NOT merged anything.
+## 13. Decisions Needed
+**Owner (Ali/Kavin):**
+1. Merge `origin/codex/ali-review-safeguards` into `Ali-Person-1`? (reviewed, tests pass, trivial docs conflict; changes reviewer authentication and makes stopped runs un-approvable.) Not merged.
+2. Bedrock model id; Lambda-zip bucket name; $25 budget alert; explicit approval to deploy.
+3. Confirm the shared-account ownership/naming proposal with Person 2.
+**Person 2:** confirm the TwinGuard contract (§9: `/internal/impact`, artifact location, `/promote`, `TRUSTED_TEST_MODIFIED`); fix/confirm the open runner items; promoter must recheck run state before applying (an in-flight promotion cannot be cancelled by the control plane); replace `apps/mcp-server/schemas` copies with canonical loading.
 
 ## 14. Next Steps
-1. **Owner:** create the `intentlock` profile privately (`aws configure --profile intentlock`), tell me the shared account id, then run `PROFILE=intentlock EXPECTED_USER=aparpia EXPECTED_ACCOUNT=<id> infrastructure/control-plane/verify_aws_readonly.sh` (or ask me to). Resolve any FAIL lines (permissions) before deploying.
-2. **Owner decisions before first deploy:** the S3 bucket for the Lambda zip; Bedrock model id + confirm model access; whether to add an AWS Budget alert; then explicit approval to deploy stack `intentlock-control-plane-dev` in `us-east-1`.
-3. **Kavin (all Kiro work):** run the real-Kiro procedure (`tests/integration/README.md`), fix the open runner items, build TwinGuard/promoter against the §9 contract. Person 1 does not run Kiro.
+1. **Owner:** create the `intentlock` profile privately; then identity check and `LIST_MODELS=1 CODE_BUCKET=<name> PROFILE=intentlock EXPECTED_USER=aparpia EXPECTED_ACCOUNT=247495661854 infrastructure/control-plane/verify_aws_readonly.sh` (I run it once the profile exists).
+2. **Owner:** decide on the safeguards-branch merge and the deployment decisions in §13.
+3. Integrate Person 2's TwinGuard when it exists (contract in §9); until then nothing of the sandbox is duplicated here.
+4. Kavin: all Kiro work and the real-Kiro run on the combined app.
 

@@ -158,3 +158,8 @@ def test_region_defaults_to_us_east_1_not_the_ambient_profile_region():
     assert aws_region({"AWS_REGION": "us-east-2", "AWS_DEFAULT_REGION": "us-west-1"}) == "us-east-2"
     s = create_store_from_env({"INTENTLOCK_STORE": "dynamodb", "INTENTLOCK_TABLE": "t"})
     assert s.backend == "dynamodb:t@us-east-1"
+
+
+def test_lambda_enables_info_logging_for_audit_lines():
+    import logging
+    assert logging.getLogger("intentlock.audit").getEffectiveLevel() <= logging.INFO

@@ -307,14 +307,23 @@ def test_tool_limit_is_exact_under_concurrent_requests(store):
     store.put_run(r)
     body = {"request_id": "x", "run_id": r.run_id, "contract_id": c.contract_id, "contract_version": 1,
             "tool": "read_file", "arguments": {"path": "src/auth/a.ts"}, "agent_id": "a", "timestamp": "2026-11-07T10:00:00Z"}
-    out = []
-    ts = [threading.Thread(target=lambda: out.append(service.authorize_request(dict(body), store))) for _ in range(12)]
+    out, errs = [], []
+
+    def worker():
+        try:
+            out.append(service.authorize_request(dict(body), store))
+        except Exception as e:                              # surfaced in the assertion message (known intermittent flake)
+            errs.append(f"{type(e).__name__}: {str(e)[:200]}")
+
+    ts = [threading.Thread(target=worker) for _ in range(12)]
     [x.start() for x in ts]; [x.join() for x in ts]
     allowed = [o for o in out if o.decision == "allow"]
     limited = [o for o in out if o.reason_code == "TOOL_CALL_LIMIT_EXCEEDED"]
-    assert len(allowed) == 5 and len(limited) == 7
     seqs = [e.seq for e in store.list_events(r.run_id)]
-    assert seqs == list(range(1, 13))                      # one gap-free event per request
+    ctx = f"results={len(out)} allowed={len(allowed)} limited={len(limited)} thread_errors={errs} seqs={seqs}"
+    assert not errs, ctx
+    assert len(allowed) == 5 and len(limited) == 7, ctx
+    assert seqs == list(range(1, 13)), ctx                 # one gap-free event per request
 
 
 def test_stop_during_evaluation_turns_allow_into_deny(store, monkeypatch):

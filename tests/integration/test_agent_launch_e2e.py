@@ -89,9 +89,7 @@ def stack(tmp_path_factory):
     else:
         raise RuntimeError("API did not start")
     yield {"url": url, "launcher": launcher, "tmp": tmp, "store": store, "env": launcher_env}
-    for rec in launcher._records.values():
-        try: os.killpg(rec.process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError): pass
+    launcher.shutdown()
     server.should_exit = True; t.join(5); sock.close()
 
 

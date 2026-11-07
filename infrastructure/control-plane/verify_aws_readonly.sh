@@ -55,6 +55,30 @@ if [ -n "${INTENTLOCK_BEDROCK_MODEL_ID:-}" ]; then
 fi
 echo "  stack '$STACK':   $("${A[@]}" cloudformation describe-stacks --stack-name "$STACK" --query 'Stacks[0].StackStatus' --output text 2>&1 | grep -q 'does not exist' && echo 'does not exist (expected before first deploy)' || echo 'EXISTS or not queryable (inspect before deploying)')"
 
+echo "== Resource-name conflicts (read-only; each should be 'free' before first deploy)"
+name_free() { # label, then a command whose failure message should contain a not-found code
+  local out; out="$("${@:2}" 2>&1)" && { res "$1" fail "ALREADY EXISTS"; return; }
+  case "$out" in *ResourceNotFound*|*NotFound*|*does\ not\ exist*|*404*) res "$1" ok "free";; *) res "$1" fail "cannot tell: $(printf '%s' "$out" | err)";; esac
+}
+name_free "table intentlock-control-plane" "${A[@]}" dynamodb describe-table --table-name intentlock-control-plane
+name_free "lambda intentlock-authorizer"   "${A[@]}" lambda get-function --function-name intentlock-authorizer
+LG="$("${A[@]}" logs describe-log-groups --log-group-name-prefix /aws/lambda/intentlock-authorizer --query 'length(logGroups)' --output text 2>&1)"
+[ "$LG" = "0" ] && res "log group /aws/lambda/intentlock-authorizer" ok "free" || res "log group /aws/lambda/intentlock-authorizer" fail "exists or cannot tell"
+if [ -n "${CODE_BUCKET:-}" ]; then
+  out="$("${A[@]}" s3api head-bucket --bucket "$CODE_BUCKET" 2>&1)" && res "code bucket $CODE_BUCKET" ok "exists and is accessible" || {
+    case "$out" in *404*|*NotFound*) echo "  NOTE  bucket $CODE_BUCKET not found: create it before uploading the Lambda zip (names are global);";;
+                   *) res "code bucket $CODE_BUCKET" fail "exists but not accessible, or cannot tell: $(printf '%s' "$out" | err)";; esac; }
+else echo "  NOTE  CODE_BUCKET not set: choose an S3 bucket name for the Lambda zip (bucket names are global)"; fi
+
+echo "== Budgets (read-only)"
+BUD="$("${A[@]}" budgets describe-budgets --account-id "$ACCT" --query 'length(Budgets)' --output text 2>&1)" && echo "  existing budgets in this account: $BUD" || echo "  cannot read budgets ($(printf '%s' "$BUD" | err))"
+
+if [ "${LIST_MODELS:-0}" = "1" ]; then
+  echo "== Bedrock (listing only, nothing invoked): Anthropic foundation models and inference profiles in $REGION"
+  "${A[@]}" bedrock list-foundation-models --by-provider anthropic --query 'modelSummaries[].[modelId,modelLifecycle.status]' --output text 2>&1 | head -40
+  "${A[@]}" bedrock list-inference-profiles --query 'inferenceProfileSummaries[?contains(inferenceProfileId, `anthropic`)].inferenceProfileId' --output text 2>&1 | tr '\t' '\n' | head -40
+fi
+
 echo "== Deploy-time permissions (IAM policy SIMULATION; evaluates your attached policies only, changes nothing)"
 ACTIONS=(cloudformation:CreateStack cloudformation:UpdateStack iam:CreateRole iam:PassRole iam:PutRolePolicy iam:AttachRolePolicy
          iam:CreatePolicy dynamodb:CreateTable lambda:CreateFunction lambda:UpdateFunctionCode logs:CreateLogGroup s3:CreateBucket s3:PutObject)

@@ -42,15 +42,13 @@ def make(store, tmp_path, argv, **extra):
 
 
 @pytest.fixture(autouse=True)
-def reap():
+def reap(store):
+    """Depends on `store` so it is torn down BEFORE the (mocked) store: every launcher is shut down and its
+    watcher threads are joined first, so no thread can touch a dead mock (or, worse, a real AWS endpoint)."""
     made = []
     yield made
     for launcher in made:
-        for rec in launcher._records.values():
-            try:
-                os.killpg(rec.process.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+        launcher.shutdown()
 
 
 def setup(client):
@@ -190,3 +188,19 @@ def test_spawn_failure_marks_run_failed(store, tmp_path, reap):
     r = client.post(f"/api/runs/{run['run_id']}/launch")
     assert r.status_code == 502 and "AGENT_LAUNCH_FAILED" in r.json()["detail"]
     assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "failed"
+
+
+def test_shutdown_kills_runner_and_stops_watcher_from_touching_the_store(store, tmp_path, reap):
+    agent = script(tmp_path, "import time\ntime.sleep(60)\n")
+    launcher, client = make(store, tmp_path, [sys.executable, agent])
+    reap.append(launcher)
+    c, run = setup(client)
+    client.post(f"/api/runs/{run['run_id']}/launch")
+    assert launcher.status(run["run_id"])["alive"]
+    before = len(store.list_events(run["run_id"]))
+    launcher.shutdown()
+    assert not launcher.status(run["run_id"])["alive"]
+    assert all(not t.is_alive() for t in launcher._threads)
+    time.sleep(0.4)
+    assert len(store.list_events(run["run_id"])) == before                    # no exit event written after shutdown
+    assert client.get(f"/api/runs/{run['run_id']}").json()["status"] == "active"

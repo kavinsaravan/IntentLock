@@ -64,6 +64,8 @@ class AgentLauncher:
         env = dict(os.environ if env is None else env)
         self._store, self._now = store, now_fn
         self._records: dict[str, LaunchRecord] = {}
+        self._threads: list[threading.Thread] = []
+        self._stopping = threading.Event()
         self._lock = threading.Lock()
         self.argv_template: list[str] | None = None
         self.problem: str | None = None
@@ -119,7 +121,9 @@ class AgentLauncher:
                 raise LaunchError(type(e).__name__) from e
             rec = LaunchRecord(run.run_id, proc, self._now())
             self._records[run.run_id] = rec
-        threading.Thread(target=self._watch, args=(rec,), daemon=True, name=f"agent-watch-{run.run_id}").start()
+        t = threading.Thread(target=self._watch, args=(rec,), daemon=True, name=f"agent-watch-{run.run_id}")
+        self._threads.append(t)
+        t.start()
         return rec
 
     # ------------------------------------------------------------------ status
@@ -135,6 +139,19 @@ class AgentLauncher:
         return {"configured": self.configured, "mode": "local-subprocess" if self.configured else None,
                 "detail": None if self.configured else self.problem}
 
+    def shutdown(self, join_timeout: float = 5.0) -> None:
+        """Stop watching, kill any runner still alive, and join the watcher threads. After this returns no
+        watcher touches the store again (important for tests and for clean process exit)."""
+        self._stopping.set()
+        for rec in list(self._records.values()):
+            if rec.process.poll() is None:
+                try:
+                    os.killpg(rec.process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        for t in self._threads:
+            t.join(join_timeout)
+
     # ----------------------------------------------------------------- watcher
     def _signal_group(self, rec: LaunchRecord, sig: int, label: str) -> None:
         rec.escalation.append(label)
@@ -147,7 +164,7 @@ class AgentLauncher:
         terminal_since: float | None = None
         steps = [(0.0, signal.SIGINT, "SIGINT"), (2.0, signal.SIGTERM, "SIGTERM"), (4.0, signal.SIGKILL, "SIGKILL")]
         done: set[str] = set()
-        while rec.process.poll() is None:
+        while rec.process.poll() is None and not self._stopping.is_set():
             try:
                 run = self._store.get_run(rec.run_id)
             except Exception:
@@ -160,6 +177,8 @@ class AgentLauncher:
                         done.add(label)
                         self._signal_group(rec, sig, label)
             time.sleep(0.1)
+        if self._stopping.is_set():
+            return                                   # shut down: never touch the store again
         rec.exit_code = rec.process.returncode
         self._record_exit(rec)
 

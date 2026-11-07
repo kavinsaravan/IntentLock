@@ -49,12 +49,18 @@ Resources:
         SSEEnabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
 
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${FunctionName}"
       RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
 
   # Exactly what the store needs: no Scan, no DeleteItem, no table administration, this table only.
   TableAccessPolicy:
@@ -84,6 +90,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Ref TableAccessPolicy
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
       Policies:
         - PolicyName: WriteOwnLogs
           PolicyDocument:
@@ -112,6 +121,9 @@ Resources:
         Variables:
           INTENTLOCK_STORE: dynamodb
           INTENTLOCK_TABLE: !Ref Table
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
 
   FunctionUrl:
     Type: AWS::Lambda::Url
