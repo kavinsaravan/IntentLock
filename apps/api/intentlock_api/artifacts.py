@@ -1,6 +1,6 @@
 """Read-only access to the exact patch artifact named by an ImpactReport, with integrity verification.
 
-The execution plane (TwinGuard) WRITES artifacts using the PRD key layout (runs/{run_id}/patches/{sha256}.patch).
+The execution plane (Impact Preview) WRITES artifacts using the PRD key layout (runs/{run_id}/patches/{sha256}.patch).
 The control plane only READS them, and never serves bytes whose SHA-256 differs from the report's
 `patch_sha256`. LOCAL DEV reader: a directory (INTENTLOCK_ARTIFACT_DIR) standing in for the S3 bucket.
 An S3 reader is NOT implemented (no AWS access has been used); it must implement the same interface.

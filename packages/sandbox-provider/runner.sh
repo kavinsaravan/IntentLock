@@ -5,7 +5,7 @@ cp -a /input/. /work/repo/
 cd /work/repo
 git init -q
 git config user.email sandbox@intentlock.invalid
-git config user.name TwinGuard
+git config user.name Impact Preview
 git add .
 git commit -qm baseline
 [ ! -f package.json ] || cp package.json /out/package-before.json

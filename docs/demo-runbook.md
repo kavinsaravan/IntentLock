@@ -30,7 +30,7 @@ This is a **localhost** demo for security, platform, and DevOps teams that use c
    export INTENTLOCK_BEDROCK_MODEL_ID=us.anthropic.claude-haiku-5-5
    ```
 
-   Bedrock is optional to starting the stack. If it is unavailable, use the dashboard's clearly labelled fixture draft. The fixture still requires approval and runs through the same deterministic policy and TwinGuard checks.
+   Bedrock is optional to starting the stack. If it is unavailable, use the dashboard's clearly labelled fixture draft. The fixture still requires approval and runs through the same deterministic policy and Impact Preview checks.
 
 5. Run the preflight and start the stack in that same terminal:
 
@@ -39,24 +39,24 @@ This is a **localhost** demo for security, platform, and DevOps teams that use c
    bash demo/start_local_demo.sh
    ```
 
-   Keep the terminal open. The script builds `intentlock-twinguard:local`, creates a **fresh** temporary Git repository, starts the promoter on `127.0.0.1:8790`, the API on `127.0.0.1:8787`, and the dashboard on `http://localhost:5173/`. It prints the fresh base commit and private log directory. It does not print tokens. If using a screen recorder, show only the browser after startup.
+   Keep the terminal open. The script builds `intentlock-impact-preview:local`, creates a **fresh** temporary Git repository, starts the promoter on `127.0.0.1:8790`, the API on `127.0.0.1:8787`, and the dashboard on `http://localhost:5173/`. It prints the fresh base commit and private log directory. It does not print tokens. If using a screen recorder, show only the browser after startup.
 
    The script refuses to start (exit code 2, including with `--check`) if any of ports 8787, 8790, or 5173 is already in use, and names the process holding it. Stop the earlier stack first. To run a second stack beside it, set `INTENTLOCK_DEMO_API_PORT`, `INTENTLOCK_DEMO_PROMOTER_PORT`, and `INTENTLOCK_DEMO_WEB_PORT` to free ports.
 
 ## Five-minute judge walkthrough
 
-**Prompt 2 proof:** Judges should see all four required actions: launch Kiro, watch live tool traffic, deny a disallowed request, and press **Stop run**. The recorded unsafe-then-safe patch flow below demonstrates TwinGuard's additional value, but does not itself show the protected-path denial or a manual Stop. Rehearse a short separate run that requests `.env` and show `PROTECTED_PATH` in Agent activity; that denial automatically blocks its run. Start another run and press **Stop run** while it is active, then show the stopped state. Automated tests verify that later controlled requests receive `RUN_NOT_ACTIVE`; do not claim a later live request occurred unless it appears in the current run's audit. Keep the [previously verified patch screenshots](demo-evidence/README.md) available if Kiro takes a different path live. State clearly when evidence comes from a different run.
+**Prompt 2 proof:** Judges should see all four required actions: launch Kiro, watch live tool traffic, deny a disallowed request, and press **Stop run**. The recorded unsafe-then-safe patch flow below demonstrates Impact Preview's additional value, but does not itself show the protected-path denial or a manual Stop. Rehearse a short separate run that requests `.env` and show `PROTECTED_PATH` in Agent activity; that denial automatically blocks its run. Start another run and press **Stop run** while it is active, then show the stopped state. Automated tests verify that later controlled requests receive `RUN_NOT_ACTIVE`; do not claim a later live request occurred unless it appears in the current run's audit. Keep the [previously verified patch screenshots](demo-evidence/README.md) available if Kiro takes a different path live. State clearly when evidence comes from a different run.
 
 | Time | Show | Say |
 | --- | --- | --- |
 | 0:00–0:35 | Create mission | “Coding agents help us ship, but security teams need proof of what they were allowed to do and what a patch would break.” |
 | 0:35–1:20 | Generate contract, then review | “Bedrock drafts the mission. A human approves it; Bedrock does not make the access decision.” Point to allowed paths, protected paths, fixed `npm run test:auth`, and disabled network. |
 | 1:20–2:15 | Approve and launch | “Real Kiro gets only IntentLock MCP tools. The policy checks each call and records the result.” Show the live run and an allowed read. |
-| 2:15–3:15 | Unsafe patch report | “TwinGuard ran the proposed edit in Docker. The fixed auth test failed, so approval is disabled and the real repository is unchanged.” |
+| 2:15–3:15 | Unsafe patch report | “Impact Preview ran the proposed edit in Docker. The fixed auth test failed, so approval is disabled and the real repository is unchanged.” |
 | 3:15–4:20 | Corrected patch and human review | Select the passing attempt. Point to the diff and SHA-256; enter the private reviewer token, click **Approve exact patch**, then **Request promotion**. |
 | 4:20–5:00 | Promotion and audit | Show `PROMOTED` and the final audit. “The promoter rechecked the run, base commit, review, and exact patch bytes before applying it.” |
 
-Use the task field to describe the timeout bug. For the full unsafe-then-safe live sequence, edit the contract’s **Mission summary** before approving it to instruct Kiro to read `src/auth/session.ts`, submit an auth-bypass proposal first, then submit a separate patch changing `>= timeoutSeconds;` to `>= timeoutSeconds * 1000;` without editing tests. TwinGuard must block the first proposal. Kiro is nondeterministic: rehearse this sequence and keep the verified [unsafe](demo-evidence/intentlock-full-unsafe.png) and [promoted](demo-evidence/intentlock-full-promoted.png) screenshots available if the live agent takes a different route. Do not claim a screenshot came from the live attempt if it did not.
+Use the task field to describe the timeout bug. For the full unsafe-then-safe live sequence, edit the contract’s **Mission summary** before approving it to instruct Kiro to read `src/auth/session.ts`, submit an auth-bypass proposal first, then submit a separate patch changing `>= timeoutSeconds;` to `>= timeoutSeconds * 1000;` without editing tests. Impact Preview must block the first proposal. Kiro is nondeterministic: rehearse this sequence and keep the verified [unsafe](demo-evidence/intentlock-full-unsafe.png) and [promoted](demo-evidence/intentlock-full-promoted.png) screenshots available if the live agent takes a different route. Do not claim a screenshot came from the live attempt if it did not.
 
 The dashboard defaults to reviewer `demo-user`. Use the `INTENTLOCK_REVIEWER_TOKEN` generated in your private terminal for the masked reviewer-token field. The fresh base commit is prefilled by the startup script. On the impact page, select the **earlier** attempt to show the blocked patch and the **latest** attempt for the corrected patch. If the current run has one attempt, use the recorded evidence for the other case.
 

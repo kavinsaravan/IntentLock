@@ -31,10 +31,10 @@ from .paths import (
 # ADD protection, never remove it). Slash-less => matches at any depth.
 BASELINE_PROTECTED = (".git", ".env*")
 
-# Test infrastructure the agent may READ but never CHANGE (create/modify/delete/rename): TwinGuard judges a
+# Test infrastructure the agent may READ but never CHANGE (create/modify/delete/rename): Impact Preview judges a
 # patch with these, so an agent-submitted patch must not be able to weaken them. Applies to propose_patch
 # only; protected-path precedence and allowed-path rules still apply first. Case-insensitive; slash-less
-# patterns match at any depth. Enforced again by TwinGuard (see docs/handoffs/person1-control-plane.md §9).
+# patterns match at any depth. Enforced again by Impact Preview (see docs/handoffs/person1-control-plane.md §9).
 TRUSTED_TEST_PATTERNS = (
     "tests/**", "test/**", "__tests__/**", "**/tests/**", "**/test/**", "**/__tests__/**",
     "*.test.*", "*.spec.*", "jest.config.*", "vitest.config.*", ".mocharc*", "jest.setup.*", "setupTests.*",

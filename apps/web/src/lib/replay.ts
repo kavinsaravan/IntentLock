@@ -1,7 +1,7 @@
 // Security Replay view returned by GET /api/replay/runs/{run_id}. Computed by the backend from stored evidence;
 // the UI only renders it and never derives a security decision of its own.
 export type Tone = "allow" | "deny" | "pending" | "stopped" | "review" | "info" | "ok" | "na";
-export type EvidenceKind = "audit_export" | "twinguard_artifacts" | "live_store";
+export type EvidenceKind = "audit_export" | "impact_preview_artifacts" | "live_store";
 
 export interface ReplaySource { id: string; label: string; available: boolean; reason: string | null; runs?: number }
 export interface ReplayRunSummary {
@@ -96,17 +96,17 @@ export function promotionLabel(a: Attempt): [string, Tone] {
 
 export const EVIDENCE_LABEL: Record<EvidenceKind, [string, Tone]> = {
   audit_export: ["Full audit export", "ok"],
-  twinguard_artifacts: ["TwinGuard artifacts only", "review"],
+  impact_preview_artifacts: ["Impact Preview artifacts only", "review"],
   live_store: ["Live control-plane store", "info"],
 };
 
 export const STAGE_LABEL: Record<string, string> = {
   mission_approved: "Mission", run_started: "Run", agent_started: "Agent", agent_note: "Agent",
-  tool_request: "Authorization", twinguard: "TwinGuard", review: "Review", promotion: "Promotion", run_final: "Final",
+  tool_request: "Authorization", impact_preview: "Impact Preview", review: "Review", promotion: "Promotion", run_final: "Final",
 };
 
 export const BLOCKER_TEXT: Record<string, string> = {
-  IMPACT_BLOCKED: "TwinGuard blocked this patch", ALREADY_REVIEWED: "a review decision was already recorded",
+  IMPACT_BLOCKED: "Impact Preview blocked this patch", ALREADY_REVIEWED: "a review decision was already recorded",
   NOT_APPROVED: "no approval recorded", ALREADY_REQUESTED: "promotion was already requested",
   PATCH_HASH_MISMATCH: "patch bytes do not match the reported digest", PATCH_UNAVAILABLE: "patch artifact unavailable",
   STALE_BASE_COMMIT: "base commit no longer matches", CONTRACT_NOT_ACTIVE: "contract superseded or revoked",

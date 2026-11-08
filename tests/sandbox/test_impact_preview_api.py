@@ -1,4 +1,4 @@
-"""Actual HTTP control plane, Docker TwinGuard and HTTP promoter, using local artifacts."""
+"""Actual HTTP control plane, Docker Impact Preview and HTTP promoter, using local artifacts."""
 import json
 import os
 import re
@@ -22,13 +22,13 @@ sys.path.insert(0, str(ROOT / 'apps/mcp-server'))
 sys.path.insert(0, str(ROOT / 'packages/patch-promoter'))
 sys.path.insert(0, str(ROOT / 'packages/sandbox-provider'))
 from control_plane import Client
-from twinguard import preview
+from impact_preview import preview
 import service as promoter_service
 from export_audit import export as export_audit
 
 
 @unittest.skipUnless(P1, 'Set INTENTLOCK_PERSON1_CHECKOUT')
-class TwinGuardApi(unittest.TestCase):
+class ImpactPreviewApi(unittest.TestCase):
     def setUp(self):
         # The promoter deliberately applies without committing; each case starts from a clean demo tree.
         subprocess.run(['git','-C',str(self.repo),'restore','--worktree','.'],check=True)

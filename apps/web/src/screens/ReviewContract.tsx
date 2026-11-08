@@ -74,7 +74,7 @@ function Form({ state }: { state: DraftState }) {
         </Card>
         <Card title="Required exports">
           <textarea rows={3} value={exportsTxt} onChange={(e) => setExportsTxt(e.target.value)} />
-          <p className="muted">One per line. TwinGuard blocks a patch that removes one.</p>
+          <p className="muted">One per line. Impact Preview blocks a patch that removes one.</p>
         </Card>
         <Card title="Allowed paths"><textarea rows={5} value={allowed} onChange={(e) => setAllowed(e.target.value)} spellCheck={false} />
           <p className="muted">Globs, one per line, anchored at the repository root.</p></Card>

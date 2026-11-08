@@ -1,7 +1,7 @@
-"""TwinGuard-facing API tests.
+"""Impact Preview-facing API tests.
 
 SIMULATED DATA: impact reports and patch artifacts here are built from fixtures by the test, NOT produced by a
-real TwinGuard sandbox (Person 2 has not implemented one). The promoter is a FAKE (records calls) except in the
+real Impact Preview sandbox (Person 2 has not implemented one). The promoter is a FAKE (records calls) except in the
 HTTP-client tests, which talk to a real local HTTP server. They prove the control plane's enforcement logic.
 """
 import hashlib

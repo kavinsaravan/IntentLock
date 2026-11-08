@@ -11,7 +11,7 @@ import tempfile
 import time
 import uuid
 
-IMAGE = 'intentlock-twinguard:local'
+IMAGE = 'intentlock-impact-preview:local'
 MAX_PATCH = 1_000_000
 
 class SandboxError(Exception):

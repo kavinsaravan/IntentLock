@@ -207,7 +207,7 @@ class ImpactTest(_Strict):
     exit_code: int | None = None
     duration_ms: int = Field(ge=0)
     output_s3_key: str | None = None
-    # Additive (0.1.0-compatible): why TwinGuard selected this catalogue check for this patch.
+    # Additive (0.1.0-compatible): why Impact Preview selected this catalogue check for this patch.
     reason: str | None = None
 
 

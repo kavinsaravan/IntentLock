@@ -7,7 +7,7 @@ import fixtureDraft from "../../../../packages/contracts/fixtures/contract-draft
 
 export interface DraftState { draft: ContractDraft; source: "bedrock" | "fixture"; attempts?: number }
 const COMMIT_RX = /^[0-9a-f]{40}$/;
-const DEFAULT_TASK = "Read src/auth/session.ts, then propose a patch fixing the timeout's seconds-to-milliseconds conversion. TwinGuard runs auth-tests on the patch; finish after its impact report. Do not inspect or edit tests, secrets, or the network.";
+const DEFAULT_TASK = "Read src/auth/session.ts, then propose a patch fixing the timeout's seconds-to-milliseconds conversion. Impact Preview runs auth-tests on the patch; finish after its impact report. Do not inspect or edit tests, secrets, or the network.";
 
 export function CreateMission({ onDraft }: { onDraft: (d: DraftState) => void }) {
   const [task, setTask] = useState(DEFAULT_TASK);

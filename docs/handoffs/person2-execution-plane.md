@@ -1,5 +1,14 @@
 # Handoff — Person 2 execution plane
 
+> Historical work log: this file preserves the former feature name, branch names, and test paths used at the time. The current product calls the feature **Impact Preview**; use the root README and current source paths for setup.
+
+## 2026-11-08 feature rename: Impact Preview
+
+- Renamed the dashboard feature, current documentation, internal Python module and tests, replay evidence labels, shared fixture key, and local Docker image tag from the former name to **Impact Preview**. Security Replay remains a feature of IntentLock.
+- Verified with the full Python suite (`566 passed, 20 skipped`), web tests (`28 passed`), web production build, Docker image build, and local demo preflight. The existing localhost stack was left running; restart it after updating the checkout to see the new dashboard text.
+- Historical handoff entries, branch names, and screenshots retain their original wording. Current paths and commands are in the root README and demo runbook.
+- Branch: `kavinperson2branch`, based on `main` commit `39dc5f0`. Next step: merge this branch into `main` after review, then rehearse the browser demo on the merged checkout.
+
 ## 2026-11-07 branch push: check catalogue and demo guidance
 
 `kavinperson2branch` now combines the automatic trusted check catalogue, `run_approved_command`, payments fixture, optional impact coverage/reason fields, dashboard check display and navigation, and the later Kiro tool-discovery/demo guidance fixes documented below. The Bedrock proposal text now states the implemented timeout rule accurately: exact trusted argv, with a positive contract timeout no greater than the catalogue maximum. Ali should review the additive shared schema and API/web changes before merging into main. PR publishing was intentionally dropped from this milestone.

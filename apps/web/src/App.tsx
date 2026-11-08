@@ -28,7 +28,7 @@ function Header() {
   }, []);
   return (
     <header className="top">
-      <a className="brand" href="#/"><b>IntentLock</b> <span>with TwinGuard</span></a>
+      <a className="brand" href="#/"><b>IntentLock</b></a>
       <nav className="nav"><a href="#/">New mission</a><a href="#/replay">Security Replay</a></nav>
       <span className="env">
         {health === null && <Badge tone="pending">checking API…</Badge>}

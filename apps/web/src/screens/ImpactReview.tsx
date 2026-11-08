@@ -10,7 +10,7 @@ import { useRunLive } from "../lib/useRunLive";
 type Load<T> = { s: "idle" } | { s: "loading" } | { s: "unavailable"; why: string } | { s: "error"; why: string } | { s: "ok"; v: T };
 const sevTone = (s: string) => (s === "critical" || s === "high" ? "deny" : s === "medium" ? "review" : "info") as "deny" | "review" | "info";
 const BLOCKER_TEXT: Record<string, string> = {
-  IMPACT_BLOCKED: "TwinGuard blocked this patch", ALREADY_REVIEWED: "a decision was already recorded", NOT_APPROVED: "no approval recorded",
+  IMPACT_BLOCKED: "Impact Preview blocked this patch", ALREADY_REVIEWED: "a decision was already recorded", NOT_APPROVED: "no approval recorded",
   ALREADY_REQUESTED: "promotion was already requested", PATCH_HASH_MISMATCH: "patch bytes do not match the reported digest",
   PATCH_UNAVAILABLE: "patch artifact unavailable", STALE_BASE_COMMIT: "base commit no longer matches", CONTRACT_NOT_ACTIVE: "the contract was superseded or revoked",
   RUN_NOT_ELIGIBLE: "the run was stopped, blocked or failed", RUN_NOT_FOUND: "run not found", CONTRACT_NOT_FOUND: "contract not found",
@@ -86,17 +86,17 @@ export function ImpactReview({ runId }: { runId: string }) {
             {patchReq
               ? <p><Badge tone={patchReq.decision === "allow" ? "allow" : patchReq.decision === "deny" ? "deny" : "pending"}>{(patchReq.decision ?? "evaluating").toUpperCase()}</Badge> latest <code>propose_patch</code> request{patchReq.reason_code && <> · <code>{patchReq.reason_code}</code></>}</p>
               : <p className="muted">No <code>propose_patch</code> request recorded for this run.</p>}</div>
-          <div><h3>TwinGuard (consequence inspection)</h3>
+          <div><h3>Impact Preview (consequence inspection)</h3>
             {r ? <p><Badge tone={blocked ? "deny" : r.decision === "pass" ? "ok" : "review"}>{r.decision.replace("_", " ").toUpperCase()}</Badge>{r.decision === "pass" && <span className="muted"> may proceed to human review — never auto-applied</span>}</p>
               : <p className="muted">No impact report loaded.</p>}</div>
         </div>
       </Card>
 
       {!detected && (
-        <Card title="TwinGuard impact report">
+        <Card title="Impact Preview report">
           {!id && (
             <Notice tone="info" title="No impact report yet">
-              No <code>impact_report</code> event with an <code>impact_report_id</code> has been received for this run. TwinGuard belongs to the execution plane and submits reports to <code>POST /internal/impact</code>.
+              No <code>impact_report</code> event with an <code>impact_report_id</code> has been received for this run. Impact Preview belongs to the execution plane and submits reports to <code>POST /internal/impact</code>.
             </Notice>
           )}
           <label className="field"><span>Load an impact report by id</span>
@@ -134,7 +134,7 @@ export function ImpactReview({ runId }: { runId: string }) {
           {patch.s === "ok" && <DiffView patch={patch.v} />}
         </Card>
         <Card title="Human review">
-          {blocked && <Notice tone="error" title="Blocked by TwinGuard">Blocked patches cannot be approved or promoted (enforced by the backend).</Notice>}
+          {blocked && <Notice tone="error" title="Blocked by Impact Preview">Blocked patches cannot be approved or promoted (enforced by the backend).</Notice>}
           <label className="field"><span>Reviewer</span><input value={reviewer} onChange={(e) => setReviewer(e.target.value)} maxLength={128} /></label>
           <label className="field"><span>Reviewer token</span><input type="password" autoComplete="off" value={reviewToken} onChange={(e) => setReviewToken(e.target.value)} /></label>
           {status && <p className="muted">Reviewer policy: {status.reviewer_policy}.</p>}
@@ -158,7 +158,7 @@ export function ImpactReview({ runId }: { runId: string }) {
   );
 }
 
-/** Checks TwinGuard selected from the changed paths, why, and what no test covers. */
+/** Checks Impact Preview selected from the changed paths, why, and what no test covers. */
 export function ChecksCard({ r }: { r: Pick<ImpactReport, "tests" | "coverage"> }) {
   const uncovered = r.coverage?.uncovered_paths ?? [];
   return (

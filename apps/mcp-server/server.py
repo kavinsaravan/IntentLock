@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 MAX_FILE = 65536
 
 from control_plane import Client, Denied
-from twinguard import preview
+from impact_preview import preview
 
 MAX_ENTRIES = 2000
 MAX_RESULTS = 100
@@ -149,7 +149,7 @@ TOOLS = [{'name': 'list_files', 'description': 'List authorized direct children 
           'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False}},
          {'name': 'search_code', 'description': 'Search authorized paths for a literal query, returning at most 100 matches.',
           'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string'}, 'paths': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['query','paths'], 'additionalProperties': False}},
-         {'name':'propose_patch','description':'Preview an authorized unified Git patch in TwinGuard without modifying the protected repository. The returned impact decision includes checks run against the patched snapshot; after a passing report, finish the task for human review.',
+         {'name':'propose_patch','description':'Submit an authorized unified Git patch to Impact Preview without modifying the protected repository. The returned impact decision includes checks run against the patched snapshot; after a passing report, finish the task for human review.',
           'inputSchema':{'type':'object','properties':{'patch':{'type':'string'}},'required':['patch'],'additionalProperties':False}},
          {'name':'run_approved_test','description':'Run an approved test (by test_id) on the original clean base in the isolated Docker sandbox. This does not test a proposed patch; use the propose_patch impact report for that.',
           'inputSchema':{'type':'object','properties':{'test_id':{'type':'string'}},'required':['test_id'],'additionalProperties':False}},
@@ -172,7 +172,7 @@ class Server:
         On lookup failure, serve the plain descriptions; calls then fail closed at authorization.
         """
         try:
-            from twinguard import approved_check_ids
+            from impact_preview import approved_check_ids
             client = Client.from_env()
             contract = _contract(client, self.contract_id, self.version)
             ids = approved_check_ids(client, self.contract_id, self.version, contract=contract)
@@ -236,18 +236,18 @@ class Server:
             contract = _contract(Client.from_env(), self.contract_id, self.version)
             result = json.dumps(self.repository.search(args['query'], args['paths'], contract))
         elif tool == 'run_approved_test':
-            from twinguard import approved_test
+            from impact_preview import approved_test
             result = json.dumps(approved_test(Client.from_env(), self.repository.root, self.run_id,
                                               self.contract_id, self.version, args['test_id']))
         elif tool == 'run_approved_command':
-            from twinguard import run_command
+            from impact_preview import run_command
             result = json.dumps(run_command(Client.from_env(), self.repository.root, self.run_id,
                                             self.contract_id, self.version, args['command_id']))
         elif tool == 'request_permission':
-            from twinguard import record_agent_note
+            from impact_preview import record_agent_note
             result = json.dumps(record_agent_note(Client.from_env(), self.run_id, 'permissions', args))
         elif tool == 'finish_task':
-            from twinguard import record_agent_note
+            from impact_preview import record_agent_note
             result = json.dumps(record_agent_note(Client.from_env(), self.run_id, 'summaries', args))
         else:
             try:

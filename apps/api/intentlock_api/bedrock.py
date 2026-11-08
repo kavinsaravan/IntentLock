@@ -28,7 +28,7 @@ mission (string), allowed_tools (subset of list_files, read_file, search_code,
 propose_patch, run_approved_test, run_approved_command), allowed_paths (repo-relative globs),
 protected_paths (globs; always include ".env*", ".git/**", ".github/**", "infra/**"),
 approved_tests (an object keyed by check id; choose ONLY from these trusted checks, copy argv
-exactly, and choose a positive timeout_seconds no greater than the listed maximum: {checks}. Pick the checks relevant to the task; TwinGuard
+exactly, and choose a positive timeout_seconds no greater than the listed maximum: {checks}. Pick the checks relevant to the task; Impact Preview
 selects which of them to run from the paths the patch actually changes),
 limits ({{max_files_changed, max_files_deleted, max_lines_added, max_lines_deleted,
 max_tool_calls, run_timeout_seconds<=600}}), required_exports (include "verifyToken"),

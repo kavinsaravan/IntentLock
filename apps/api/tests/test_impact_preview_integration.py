@@ -1,4 +1,4 @@
-"""Cross-workstream integration: exercises the full TwinGuard flow through the control-plane API.
+"""Cross-workstream integration: exercises the full Impact Preview flow through the control-plane API.
 
 Tests the complete path Person 2's code will follow: authorize MCP requests, submit impact reports,
 review/approve, and promote. Uses a REAL local promoter HTTP server (not a mock) and the actual
@@ -284,7 +284,7 @@ class TestScenarioA:
 
 
 class TestScenarioB:
-    """Unsafe patch: TwinGuard blocks it; approval/promotion refused; repo unchanged."""
+    """Unsafe patch: Impact Preview blocks it; approval/promotion refused; repo unchanged."""
     def test_blocked_patch_cannot_be_approved(self, ienv):
         contract = ienv.create_contract()
         run = ienv.create_run(contract)
@@ -316,7 +316,7 @@ class TestScenarioB:
 
 
 class TestScenarioC:
-    """Safe patch: passes TwinGuard, approved, promoted with hash verification."""
+    """Safe patch: passes Impact Preview, approved, promoted with hash verification."""
     def test_full_approve_promote_cycle(self, ienv):
         contract = ienv.create_contract()
         run = ienv.create_run(contract)

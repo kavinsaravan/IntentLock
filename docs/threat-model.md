@@ -1,7 +1,7 @@
 # IntentLock execution-plane boundaries
 
 This increment controls only the advertised MCP read tool. It does not yet claim
-the complete TwinGuard or live Kiro stopped-run demo. The stop lifecycle is verified
+the complete Impact Preview or live Kiro stopped-run demo. The stop lifecycle is verified
 with a real subprocess against the actual local control-plane API. The Kiro configuration is an application
 restriction, not an OS sandbox for the Kiro process. Global Kiro context/settings
 must be inspected in the live integration test before claiming all data access

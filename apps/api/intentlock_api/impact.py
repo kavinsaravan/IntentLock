@@ -1,4 +1,4 @@
-"""TwinGuard-facing control-plane API: impact reports, exact-patch review, approval, promotion requests.
+"""Impact Preview-facing control-plane API: impact reports, exact-patch review, approval, promotion requests.
 
 Division of responsibility (security-critical):
   * Execution plane (Person 2) produces ImpactReports + the patch artifact and performs the actual promotion.
@@ -166,7 +166,7 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
     @app.post("/internal/impact", status_code=201)
     def ingest_impact(report: ImpactReport, response: Response,
                       x_intentlock_internal_token: str | None = Header(default=None)) -> dict:
-        """Execution plane submits a TwinGuard ImpactReport (schema impact-report 0.1.0). Never triggers promotion."""
+        """Execution plane submits an ImpactReport (schema impact-report 0.1.0). Never triggers promotion."""
         require_internal(x_intentlock_internal_token)
         run = store.get_run(report.run_id)
         if run is None:
@@ -183,7 +183,7 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
                 response.status_code = 200      # idempotent resubmission
                 return {"impact_report_id": report.impact_report_id, "stored": False}
             raise HTTPException(409, "IMPACT_EXISTS")
-        event(report, "impact_report", f"TwinGuard decision: {report.decision}",
+        event(report, "impact_report", f"Impact Preview decision: {report.decision}",
               {"decision": report.decision, "patch_sha256": report.patch_sha256, "base_commit": report.base_commit})
         return {"impact_report_id": report.impact_report_id, "stored": True}
 

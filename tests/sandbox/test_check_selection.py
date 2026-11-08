@@ -16,8 +16,8 @@ def module(name, path):
     return m
 
 
-twinguard = module('twinguard_under_test', BASE / 'apps/mcp-server/twinguard.py')
-checks = twinguard.checks
+impact_preview = module('impact_preview_under_test', BASE / 'apps/mcp-server/impact_preview.py')
+checks = impact_preview.checks
 CAT = checks.load_catalogue()
 ALL_TESTS = {k: {'argv': v['argv'], 'timeout_seconds': v['timeout_seconds']} for k, v in CAT['checks'].items()}
 LIMITS = {'max_files_changed': 8, 'max_files_deleted': 0, 'max_lines_added': 300, 'max_lines_deleted': 150}
@@ -53,7 +53,7 @@ class CheckSelectionTests(unittest.TestCase):
         return p
 
     def evaluate(self, patch, contract):
-        plan, result, evidence = twinguard.evaluate(self.repo, self.base, patch, contract, 'run-test', 'sandbox-test')
+        plan, result, evidence = impact_preview.evaluate(self.repo, self.base, patch, contract, 'run-test', 'sandbox-test')
         self.assertEqual(git(self.repo, 'status', '--porcelain'), '')
         return plan, result, evidence
 
@@ -156,7 +156,7 @@ class CheckSelectionTests(unittest.TestCase):
         patch = self.patch('src/auth/session.ts', '>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
         bad = self.contract(['src/auth/**'], {'auth-tests': {'argv': ['npm', 'run', 'test:auth', '--', '--no-op'], 'timeout_seconds': 60}})
         with self.assertRaisesRegex(ValueError, 'TEST_NOT_APPROVED'):
-            twinguard.evaluate(self.repo, self.base, patch, bad, 'run-test', 'sandbox-test')
+            impact_preview.evaluate(self.repo, self.base, patch, bad, 'run-test', 'sandbox-test')
 
 
 if __name__ == '__main__':

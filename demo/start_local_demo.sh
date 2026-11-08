@@ -72,7 +72,7 @@ export INTENTLOCK_AGENT_LOG_DIR="$DEMO_ROOT/logs/agents"
 export INTENTLOCK_AGENT_LAUNCH_ARGV
 INTENTLOCK_AGENT_LAUNCH_ARGV="$($PY -c 'import json,sys; print(json.dumps([sys.argv[1], "-B", sys.argv[2], "--repository", sys.argv[3], "--run-id", "{run_id}", "--contract-id", "{contract_id}", "--contract-version", "{contract_version}", "--prompt={mission}"]))' "$PY" "$ROOT/apps/mcp-server/launch_kiro.py" "$DEMO_REPO")"
 
-docker build -q -t intentlock-twinguard:local "$ROOT/packages/sandbox-provider" >/dev/null
+docker build -q -t intentlock-impact-preview:local "$ROOT/packages/sandbox-provider" >/dev/null
 "$PY" "$ROOT/packages/patch-promoter/service.py" --repository "$DEMO_REPO" --port "$PROMOTER_PORT" >"$DEMO_ROOT/logs/promoter.log" 2>&1 &
 PROMOTER_PID=$!
 "$ROOT/apps/api/run_demo_api.sh" >"$DEMO_ROOT/logs/api.log" 2>&1 &

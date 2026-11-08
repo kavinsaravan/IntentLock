@@ -1,15 +1,15 @@
-"""TwinGuard Security Replay: read-only reconstruction of a recorded run's security decisions.
+"""Security Replay: read-only reconstruction of a recorded run's security decisions.
 
 Evidence sources, in precedence order:
-  * "s3"            - the TwinGuard evidence bucket (INTENTLOCK_REPLAY_BUCKET), read with the execution plane's
+  * "s3"            - the Impact Preview evidence bucket (INTENTLOCK_REPLAY_BUCKET), read with the execution plane's
                       hash-verifying S3 reader. Read-only: this module never writes, lists outside runs/, or
                       accepts an object key from a caller.
-  * "local"         - the local artifact directory (INTENTLOCK_ARTIFACT_DIR) written by TwinGuard / export_audit.
+  * "local"         - the local artifact directory (INTENTLOCK_ARTIFACT_DIR) written by Impact Preview / export_audit.
   * "control-plane" - the live store, by run id only (in-memory stores do not survive an API restart).
 
 Per run, `runs/{run_id}/audit/final.json` (export_audit.py) is the complete control-plane record. Without it, only
-the TwinGuard artifacts (impact reports, patches, test output) exist, and the view says so. Nothing here
-re-decides anything: authorization comes from recorded policy decisions, consequence from TwinGuard reports, and
+the Impact Preview artifacts (impact reports, patches, test output) exist, and the view says so. Nothing here
+re-decides anything: authorization comes from recorded policy decisions, consequence from Impact Preview reports, and
 eligibility from the control plane's recorded blockers. Missing records are reported as missing, never inferred.
 """
 import hashlib
@@ -298,7 +298,7 @@ class Record:
 
     def __init__(self, run_id: str, source_id: str, source_label: str) -> None:
         self.run_id, self.source_id, self.source_label = run_id, source_id, source_label
-        self.kind = "twinguard_artifacts"           # | "audit_export" | "live_store"
+        self.kind = "impact_preview_artifacts"           # | "audit_export" | "live_store"
         self.run: Run | None = None
         self.contract: MissionContract | None = None
         self.events: list[Event] | None = None       # None = control-plane events unavailable
@@ -413,8 +413,8 @@ class Replay:
             rec.impacts.append((report, None))
             known.add(report.impact_report_id)
         rec.impacts.sort(key=lambda x: x[0].created_at)       # attempt order; export_audit sorts by id
-        if rec.kind == "twinguard_artifacts" and rec.impacts:
-            rec.limitations.append("No final audit export exists for this run in this evidence store. Only TwinGuard "
+        if rec.kind == "impact_preview_artifacts" and rec.impacts:
+            rec.limitations.append("No final audit export exists for this run in this evidence store. Only Impact Preview "
                                    "artifacts are available: authorization decisions, human review and promotion "
                                    "records are not part of this evidence.")
         return rec
@@ -549,8 +549,8 @@ class Replay:
         limitations = list(rec.limitations)
         if rec.events_truncated:
             limitations.append(f"Only the first {MAX_EVENTS} events are shown.")
-        if rec.contract is None and rec.kind == "twinguard_artifacts":
-            limitations.append("The mission contract is not part of the TwinGuard artifacts; only built-in protected "
+        if rec.contract is None and rec.kind == "impact_preview_artifacts":
+            limitations.append("The mission contract is not part of the Impact Preview artifacts; only built-in protected "
                                "paths are withheld from the displayed diff.")
         run = rec.run
         return {
@@ -671,13 +671,13 @@ def _attempt_core(rec: Record, report: ImpactReport, status: dict[str, Any] | No
             auth = {"status": _decision_status(e), "seq": e.seq, "request_id": e.request_id, "reason_code": e.reason_code,
                     "latency_ms": e.latency_ms, "message": e.message,
                     "basis": f"propose_patch request event #{e.seq}, the last before impact event #{seq}."}
-    # Check 2: the TwinGuard report as recorded.
+    # Check 2: the Impact Preview report as recorded.
     failing = [t.test_id for t in report.tests if t.status != "passed"]
     blocking = [f.code for f in report.findings if f.severity in ("critical", "high")]
     consequence = {"status": {"block": "blocked", "review_required": "review_required", "pass": "passed"}[report.decision],
                    "decision": report.decision, "failing_tests": failing, "blocking_findings": blocking,
                    "tests_recorded": len(report.tests),
-                   "basis": f"TwinGuard impact report {report.impact_report_id} ({report.sandbox_id})."}
+                   "basis": f"Impact Preview report {report.impact_report_id} ({report.sandbox_id})."}
     review, promotion, eligibility = _review_and_promotion(report, status)
     return {"impact_report_id": report.impact_report_id, "created_at": _iso(report.created_at),
             "sandbox_id": report.sandbox_id, "base_commit": report.base_commit, "patch_sha256": report.patch_sha256,
@@ -695,7 +695,7 @@ def _review_and_promotion(report: ImpactReport, status: dict[str, Any] | None):
         eligibility = {"recorded": False, "promotable": False if blocked else None,
                        "approve_blockers": ["IMPACT_BLOCKED"] if blocked else [],
                        "promote_blockers": ["IMPACT_BLOCKED"] if blocked else [],
-                       "basis": "TwinGuard decision only" if blocked else why}
+                       "basis": "Impact Preview decision only" if blocked else why}
         return review, promotion, eligibility
     rv_raw = status.get("review")
     rv = None
@@ -751,7 +751,7 @@ def _review_and_promotion(report: ImpactReport, status: dict[str, Any] | None):
 
 
 _STAGE_TITLES = {"run_started": "Run started", "run_completed": "Run finished", "run_stopped": "Run stopped",
-                 "review_decision": "Human review", "promotion": "Promotion", "impact_report": "TwinGuard evaluation"}
+                 "review_decision": "Human review", "promotion": "Promotion", "impact_report": "Impact Preview evaluation"}
 
 
 def _timeline(rec: Record) -> list[dict[str, Any]]:
@@ -781,7 +781,7 @@ def _timeline(rec: Record) -> list[dict[str, Any]]:
             if r is not None:
                 items.append(_impact_item(e.seq, _iso(e.timestamp), r, f"event #{e.seq}"))
             else:
-                items.append({**base, "stage": "twinguard", "title": "TwinGuard evaluation",
+                items.append({**base, "stage": "impact_preview", "title": "Impact Preview evaluation",
                               "status": {"block": "blocked", "pass": "passed", "review_required": "review_required"}.get(d.get("decision"), "recorded"),
                               "detail": e.message, "impact_report_id": iid if isinstance(iid, str) else None})
         elif e.event_type == "review_decision":
@@ -814,7 +814,7 @@ def _timeline(rec: Record) -> list[dict[str, Any]]:
 
 
 def _impact_item(seq: int | None, ts: str | None, r: ImpactReport, source: str) -> dict[str, Any]:
-    return {"seq": seq, "timestamp": ts, "source": source, "stage": "twinguard", "title": "TwinGuard evaluation",
+    return {"seq": seq, "timestamp": ts, "source": source, "stage": "impact_preview", "title": "Impact Preview evaluation",
             "status": {"block": "blocked", "pass": "passed", "review_required": "review_required"}[r.decision],
             "detail": f"Impact report {r.impact_report_id}: decision {r.decision}", "impact_report_id": r.impact_report_id,
             "tests": [{"test_id": t.test_id, "status": t.status, "exit_code": t.exit_code} for t in r.tests],
@@ -830,7 +830,7 @@ def _outcome(rec: Record, attempts: list[dict[str, Any]]) -> dict[str, Any]:
     if promoted:
         a = promoted[-1]
         return out("safe_patch_promoted", "Safe patch promoted", "ok",
-                   f"Impact report {a['impact_report_id']} passed TwinGuard, was approved by "
+                   f"Impact report {a['impact_report_id']} passed Impact Preview, was approved by "
                    f"{a['review'].get('reviewer')}, and the promoter applied the same SHA-256.", a)
     failed = [a for a in attempts if a["promotion"]["status"] in ("refused", "failed", "inconsistent")]
     if failed:
@@ -850,10 +850,10 @@ def _outcome(rec: Record, attempts: list[dict[str, Any]]) -> dict[str, Any]:
         if latest is not a:
             st = latest["consequence"]["status"]
             tail = (f" A later attempt ({latest['impact_report_id']}) "
-                    f"{'passed TwinGuard' if st == 'passed' else 'requires review'}")
+                    f"{'passed Impact Preview' if st == 'passed' else 'requires review'}")
             tail += "; its review evidence is unavailable." if latest["review"]["status"] == "unavailable" else "."
         return out("unsafe_patch_blocked", "Unsafe patch blocked", "deny",
-                   f"TwinGuard blocked {a['impact_report_id']}: "
+                   f"Impact Preview blocked {a['impact_report_id']}: "
                    f"{', '.join(a['consequence']['blocking_findings']) or 'blocking finding recorded'}.{tail}", a)
     approved = [a for a in attempts if a["review"]["status"] == "approved"]
     if approved:
@@ -868,15 +868,15 @@ def _outcome(rec: Record, attempts: list[dict[str, Any]]) -> dict[str, Any]:
     if pending:
         a = pending[-1]
         return out("awaiting_review", "Awaiting human review", "review",
-                   f"Impact report {a['impact_report_id']} passed TwinGuard; no review decision is recorded.", a)
+                   f"Impact report {a['impact_report_id']} passed Impact Preview; no review decision is recorded.", a)
     auth = _authorization_summary(rec)
     if auth["denied"]:
         first = auth["denied_requests"][0]
         return out("unauthorized_request_denied", "Unauthorized request denied", "deny",
                    f"{auth['denied']} tool request(s) denied by IntentLock; first: {first['tool']} ({first['reason_code']}).")
     if attempts:
-        return out("evidence_partial", "TwinGuard evidence only", "na",
-                   "TwinGuard evaluated a patch, but review and promotion records are not part of this evidence.")
+        return out("evidence_partial", "Impact Preview evidence only", "na",
+                   "Impact Preview evaluated a patch, but review and promotion records are not part of this evidence.")
     status = rec.run.status if rec.run else None
     if status in ("failed", "stopped", "blocked"):
         return out(f"run_{status}", f"Run {status}", "stopped", rec.run.stop_reason or f"The run ended {status}.")

@@ -71,7 +71,7 @@ export const api = {
     `/api/runs/${encodeURIComponent(id)}/launch`, { method: "POST" }),
   launchStatus: (id: string) => call<LaunchStatus>(`/api/runs/${encodeURIComponent(id)}/launch`),
 
-  // --- Execution-plane / TwinGuard interfaces (NOT implemented by this backend yet). ---
+  // --- Impact Preview report, review, and promotion interfaces. ---
   // Expected shapes are documented in docs/handoffs/person1-control-plane.md.
   getImpact: (id: string) => call<ImpactReport>(`/api/impact/${encodeURIComponent(id)}`),
   impactStatus: (id: string) => call<ImpactStatus>(`/api/impact/${encodeURIComponent(id)}/status`),

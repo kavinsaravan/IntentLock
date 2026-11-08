@@ -5,7 +5,7 @@ Tool-agnostic (Claude Code, Codex, Cursor, humans). Do not rely on chat history;
 ## Project
 IntentLock secures autonomous coding agents on AWS with two guarantees:
 1. **IntentLock** — Bedrock *proposes* a mission contract, a human approves it, and a deterministic engine authorizes every controlled tool request (unauthorized calls are rejected before the tool runs).
-2. **TwinGuard** — authorized mutations run in an isolated sandbox first; impact is analyzed, tests run, a SHA-256-addressed patch is produced, and only the exact human-approved patch is promoted after base-commit + hash verification.
+2. **Impact Preview** — authorized mutations run in an isolated sandbox first; impact is analyzed, tests run, a SHA-256-addressed patch is produced, and only the exact human-approved patch is promoted after base-commit + hash verification.
 
 ## Source of truth
 Read `intentlock-prd.md` (product scope, security model, schemas, acceptance criteria). Do not expand scope beyond it (no new languages, tools, network, sandbox capabilities).

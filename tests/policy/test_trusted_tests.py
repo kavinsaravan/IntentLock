@@ -1,4 +1,4 @@
-"""Agent patches must not be able to change the tests TwinGuard uses to judge them."""
+"""Agent patches must not be able to change the tests Impact Preview uses to judge them."""
 import json
 import pathlib
 

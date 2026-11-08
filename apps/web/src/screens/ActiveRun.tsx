@@ -97,7 +97,7 @@ export function ActiveRun({ runId }: { runId: string }) {
             </dl>
             <div className="row">
               <button className="btn danger" onClick={stop} disabled={stopping || terminal}>{stopping ? "Stopping…" : terminal ? "Run is not active" : "Stop run"}</button>
-              <a className="btn" href={`#/runs/${runId}/impact`}>TwinGuard impact →</a>
+              <a className="btn" href={`#/runs/${runId}/impact`}>Impact Preview →</a>
               <a className="btn" href={`#/runs/${runId}/audit`}>Final audit →</a>
             </div>
             {stopInfo && <Notice tone="info">{stopInfo}</Notice>}

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: IntentLock TwinGuard private evidence bucket and scoped artifact policies
+Description: IntentLock Impact Preview private evidence bucket and scoped artifact policies
 
 Resources:
   EvidenceBucket:

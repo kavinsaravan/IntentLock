@@ -15,7 +15,7 @@ impact=module('impact',BASE/'packages/impact-analyzer/analyze.py')
 promoter=module('promoter',BASE/'packages/patch-promoter/promote.py')
 
 def git(repo,*args): return subprocess.check_output(['git','-C',str(repo),*args]).decode().strip()
-class TwinGuardTests(unittest.TestCase):
+class ImpactPreviewTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.repo=Path(self.temp.name)/'repo';shutil.copytree(BASE/'demo/repository',self.repo)
@@ -74,7 +74,7 @@ class TwinGuardTests(unittest.TestCase):
         self.assertIn('CRITICAL_TEST_FAILURE',[f['code'] for f in report['findings']])
         self.assertEqual(git(self.repo,'status','--porcelain'),'')
 
-    def test_trusted_test_and_script_changes_are_blocked_inside_twinguard(self):
+    def test_trusted_test_and_script_changes_are_blocked_inside_impact_preview(self):
         for relative, before, after in (
             ('tests/auth/session.test.ts', "verifyToken('invalid')", "verifyToken('demo-valid-token')"),
             ('package.json', 'node --experimental-strip-types', 'node --no-warnings --experimental-strip-types'),

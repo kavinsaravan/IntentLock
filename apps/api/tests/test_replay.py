@@ -1,4 +1,4 @@
-"""TwinGuard Security Replay API.
+"""Security Replay API.
 
 Control-plane records here are produced by the REAL control plane (policy engine, impact ingestion, review,
 promotion state machine) and exported with the REAL execution-plane exporter (export_audit.py). Impact reports
@@ -142,7 +142,7 @@ def test_timeline_is_in_recorded_order_and_contains_only_recorded_stages(env):
     v = historical(env).get(f"/api/replay/runs/{env.run['run_id']}").json()
     stages = [(t["stage"], t["status"]) for t in v["timeline"]]
     assert stages == [("mission_approved", "approved"), ("run_started", "recorded"), ("tool_request", "allowed"),
-                      ("tool_request", "allowed"), ("twinguard", "blocked"), ("run_final", "completed")]
+                      ("tool_request", "allowed"), ("impact_preview", "blocked"), ("run_final", "completed")]
     seqs = [t["seq"] for t in v["timeline"] if t["seq"] is not None]
     assert seqs == sorted(seqs) == list(range(1, len(seqs) + 1))
     assert not any(t["stage"] in ("review", "promotion") for t in v["timeline"])     # nothing fabricated
@@ -272,7 +272,7 @@ def test_patch_authorization_requires_matching_recorded_digest(env):
 
 
 # --------------------------------------------------------------------------------------- missing evidence
-def test_twinguard_only_evidence_reports_missing_control_plane_records(env):
+def test_impact_preview_only_evidence_reports_missing_control_plane_records(env):
     rep = blocked_report(env, "impact_only01")
     rep["tests"] = []
     impact = env.tmp / "artifacts" / f"runs/{env.run['run_id']}/impact/impact_only01.json"
@@ -280,7 +280,7 @@ def test_twinguard_only_evidence_reports_missing_control_plane_records(env):
     impact.write_text(json.dumps(rep))
     hist = historical(env)
     (summary,) = hist.get("/api/replay/runs").json()["runs"]
-    assert summary["evidence"] == "twinguard_artifacts" and summary["status"] is None
+    assert summary["evidence"] == "impact_preview_artifacts" and summary["status"] is None
     v = hist.get(f"/api/replay/runs/{env.run['run_id']}").json()
     (a,) = v["attempts"]
     assert a["authorization"]["status"] == "unavailable"
@@ -290,7 +290,7 @@ def test_twinguard_only_evidence_reports_missing_control_plane_records(env):
     assert v["authorization"]["available"] is False
     assert v["run"] is None and v["contract"] is None
     assert any("No final audit export exists" in x for x in v["limitations"])
-    assert [t["stage"] for t in v["timeline"]] == ["twinguard"]
+    assert [t["stage"] for t in v["timeline"]] == ["impact_preview"]
 
 
 def test_attempts_follow_creation_time_and_outcome_names_its_attempt(env):
@@ -304,7 +304,7 @@ def test_attempts_follow_creation_time_and_outcome_names_its_attempt(env):
     v = historical(env).get(f"/api/replay/runs/{env.run['run_id']}").json()
     assert [a["impact_report_id"] for a in v["attempts"]] == ["impact_zzz_first", "impact_aaa_second"]
     assert v["outcome"]["code"] == "unsafe_patch_blocked" and v["outcome"]["impact_report_id"] == "impact_zzz_first"
-    assert "later attempt (impact_aaa_second) passed TwinGuard; its review evidence is unavailable" in v["outcome"]["detail"]
+    assert "later attempt (impact_aaa_second) passed Impact Preview; its review evidence is unavailable" in v["outcome"]["detail"]
 
 
 def test_missing_patch_and_test_output_are_reported_not_hidden(env):

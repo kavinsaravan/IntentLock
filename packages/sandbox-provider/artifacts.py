@@ -1,4 +1,4 @@
-"""Bounded, immutable local/S3 evidence objects for the frozen TwinGuard demo."""
+"""Bounded, immutable local/S3 evidence objects for the frozen Impact Preview demo."""
 import base64
 import hashlib
 import os

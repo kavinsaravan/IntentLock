@@ -1,9 +1,9 @@
-# TwinGuard local demo
+# Impact Preview local demo
 
 This frozen prototype handles TypeScript/Node patches only. Build the sandbox image once:
 
 ```bash
-docker build -t intentlock-twinguard:local packages/sandbox-provider
+docker build -t intentlock-impact-preview:local packages/sandbox-provider
 ```
 
 `local.py` archives a clean Git base commit, mounts the snapshot and proposed patch read only, and runs the commands chosen from the trusted check catalogue (`packages/impact-analyzer/catalogue.json`; the original contract-approved `npm run test:auth` is one entry) in a no-network Docker container with a read-only root, dropped capabilities, resource limits, and a disposable writable work directory. It returns a canonical diff and test evidence; it never writes to the original repository. The impact analyzer blocks failing tests, modified trusted tests/config, protected or out-of-contract paths, and exceeded patch limits.
@@ -47,4 +47,4 @@ The actual Docker isolation probe runs with the same flags as patch execution an
 
 ## Check catalogue and selection
 
-`catalogue.json` is administrator-owned and loaded by host-side code only (override the path with `INTENTLOCK_CHECK_CATALOGUE`); it is never in the agent workspace. Each check has an ID, `kind` (`test` or `static`), argv, path globs it covers, and a timeout. `execute(..., checks=[...])` writes the selected checks to a read-only `/patch/checks.txt` and `runner.sh` runs exactly those under `timeout`, writing per-check output, exit code and duration. `run_check()` runs one check on the clean base snapshot for `run_approved_command`. The image pins `typescript@5.6.3` at build time (`docker build -t intentlock-twinguard:local packages/sandbox-provider`), so type-checking needs no network at run time.
+`catalogue.json` is administrator-owned and loaded by host-side code only (override the path with `INTENTLOCK_CHECK_CATALOGUE`); it is never in the agent workspace. Each check has an ID, `kind` (`test` or `static`), argv, path globs it covers, and a timeout. `execute(..., checks=[...])` writes the selected checks to a read-only `/patch/checks.txt` and `runner.sh` runs exactly those under `timeout`, writing per-check output, exit code and duration. `run_check()` runs one check on the clean base snapshot for `run_approved_command`. The image pins `typescript@5.6.3` at build time (`docker build -t intentlock-impact-preview:local packages/sandbox-provider`), so type-checking needs no network at run time.

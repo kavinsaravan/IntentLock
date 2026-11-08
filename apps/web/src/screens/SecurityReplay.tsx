@@ -35,7 +35,7 @@ function RunSelector({ catalog, selected, onOpen }: { catalog: ReplayCatalog; se
         <span><Badge tone={catalog.live_lookup.persistent ? "ok" : "review"}>live lookup</Badge> {catalog.live_lookup.store}</span>
       </div>
       {catalog.runs.length === 0
-        ? <p className="muted">No recorded runs were found in the configured evidence stores. Runs appear here after TwinGuard writes impact reports or the audit export runs.</p>
+        ? <p className="muted">No recorded runs were found in the configured evidence stores. Runs appear here after Impact Preview writes impact reports or the audit export runs.</p>
         : (
           <table className="tbl rp-runs"><thead><tr><th>Run</th><th>Outcome</th><th>Evidence</th><th>Status</th><th>Mission</th><th>Last activity</th></tr></thead>
             <tbody>
@@ -104,7 +104,7 @@ function TwoChecks({ v, a }: { v: ReplayView; a: Attempt | null }) {
   const split = a && a.authorization.status === "allowed" && a.consequence.status === "blocked";
   return (
     <Card title="Authorization versus consequence">
-      {split && <Notice tone="warn" title="Allowed is not the same as safe">IntentLock allowed the <code>propose_patch</code> action under the mission contract; TwinGuard then rejected what the patch would do.</Notice>}
+      {split && <Notice tone="warn" title="Allowed is not the same as safe">IntentLock allowed the <code>propose_patch</code> action under the mission contract; Impact Preview then rejected what the patch would do.</Notice>}
       <div className="rp-checks">
         <div className="rp-check">
           <div className="rp-check-h"><span className="rp-num">1</span><div><b>Action authorization</b><small>Was the agent allowed to perform the requested operation under its mission contract?</small></div></div>
@@ -123,7 +123,7 @@ function TwoChecks({ v, a }: { v: ReplayView; a: Attempt | null }) {
             {a.consequence.tests_recorded === 0 ? <p><Badge tone="na">No trusted test result recorded</Badge></p>
               : <p>Trusted tests: {a.consequence.failing_tests.length === 0 ? <b>all {a.consequence.tests_recorded} passed</b> : <b className="bad">{a.consequence.failing_tests.join(", ")} failed</b>}</p>}
             {a.consequence.blocking_findings.length > 0 && <p>Blocking findings: {a.consequence.blocking_findings.map((c) => <code key={c} className="bad">{c} </code>)}</p>}
-          </>) : <><div className="rp-verdict"><Badge tone="na">No patch evaluated</Badge></div><p className="muted">No TwinGuard impact report is recorded for this run.</p></>}
+          </>) : <><div className="rp-verdict"><Badge tone="na">No patch evaluated</Badge></div><p className="muted">No Impact Preview report is recorded for this run.</p></>}
         </div>
       </div>
     </Card>
@@ -134,7 +134,7 @@ function TwoChecks({ v, a }: { v: ReplayView; a: Attempt | null }) {
 function Timeline({ items, events }: { items: TimelineItem[]; events: boolean }) {
   return (
     <Card title="Security timeline" right={<span className="muted">{items.length} recorded entr{items.length === 1 ? "y" : "ies"}</span>}>
-      {!events && <Notice tone="info" title="Partial timeline">Control-plane events were not exported for this run. Only TwinGuard artifacts are shown; no other stage is inferred.</Notice>}
+      {!events && <Notice tone="info" title="Partial timeline">Control-plane events were not exported for this run. Only Impact Preview artifacts are shown; no other stage is inferred.</Notice>}
       <ol className="rp-timeline">
         {items.map((t, i) => (
           <li key={`${t.seq ?? "x"}-${i}`} className={`rp-ti rp-ti-${statusLabel(t.status)[1]}`}>
@@ -202,8 +202,8 @@ function TestsCard({ a }: { a: Attempt }) {
 
 function FindingsCard({ a }: { a: Attempt }) {
   return (
-    <Card title="Impact findings" right={<>TwinGuard decision <S status={a.consequence.status} /></>}>
-      {a.findings.length === 0 ? <p className="muted">TwinGuard recorded no findings for this patch.</p> : (
+    <Card title="Impact findings" right={<>Impact Preview decision <S status={a.consequence.status} /></>}>
+      {a.findings.length === 0 ? <p className="muted">Impact Preview recorded no findings for this patch.</p> : (
         <ul className="findings">{a.findings.map((f, i) => <li key={i}><Badge tone={sevTone(f.severity)}>{f.severity}</Badge> <code>{f.code}</code><div>{f.message}</div>{f.evidence && <small className="muted">evidence: {f.evidence}</small>}</li>)}</ul>)}
       <p className="muted">Report <code>{a.impact_report_id}</code> · sandbox <code>{a.sandbox_id}</code> · {fmtWhen(a.created_at)} · +{a.summary.lines_added} / −{a.summary.lines_deleted} lines</p>
     </Card>
@@ -316,7 +316,7 @@ export function SecurityReplay({ runId, source }: { runId: string | null; source
   return (
     <>
       <div className="rp-head">
-        <h1>TwinGuard Security Replay</h1>
+        <h1>Security Replay</h1>
         <p className="muted">Read-only reconstruction of recorded security decisions. Nothing on this page is re-evaluated or inferred.</p>
       </div>
       {catalog.s === "loading" && <Spinner label="Loading recorded runs…" />}

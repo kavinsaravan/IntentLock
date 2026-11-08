@@ -16,7 +16,7 @@ function attempt(over: Partial<Attempt> = {}): Attempt {
     summary: { files_created: 0, files_modified: 1, files_deleted: 0, files_renamed: 0, lines_added: 1, lines_deleted: 1 },
     findings: [],
     authorization: { status: "allowed", basis: "propose_patch request event #3, the last before impact event #4.", seq: 3, request_id: "r-patch" },
-    consequence: { status: "passed", decision: "pass", failing_tests: [], blocking_findings: [], tests_recorded: 1, basis: "TwinGuard impact report impact_1 (sandbox_1)." },
+    consequence: { status: "passed", decision: "pass", failing_tests: [], blocking_findings: [], tests_recorded: 1, basis: "Impact Preview report impact_1 (sandbox_1)." },
     review: { status: "none", basis: "No review decision was recorded." },
     promotion: { status: "none", basis: "No promotion was requested." },
     eligibility: { recorded: true, promotable: true, can_approve: true, can_promote: false, approve_blockers: [], promote_blockers: ["NOT_APPROVED"], basis: "recorded" },
@@ -44,14 +44,14 @@ function view(over: Partial<ReplayView> = {}): ReplayView {
     ],
     authorization: { available: true, total: 1, allowed: 1, denied: 0, pending: 0, denied_requests: [] },
     attempts: [attempt()],
-    outcome: { code: "awaiting_review", title: "Awaiting human review", tone: "review", detail: "passed TwinGuard" },
+    outcome: { code: "awaiting_review", title: "Awaiting human review", tone: "review", detail: "passed Impact Preview" },
     claims: [], limitations: [],
     ...over,
   };
 }
 
 const blocked = () => attempt({
-  consequence: { status: "blocked", decision: "block", failing_tests: ["auth-tests"], blocking_findings: ["CRITICAL_TEST_FAILURE"], tests_recorded: 1, basis: "TwinGuard impact report impact_1." },
+  consequence: { status: "blocked", decision: "block", failing_tests: ["auth-tests"], blocking_findings: ["CRITICAL_TEST_FAILURE"], tests_recorded: 1, basis: "Impact Preview report impact_1." },
   findings: [{ severity: "critical", code: "CRITICAL_TEST_FAILURE", message: "Approved authentication tests failed", evidence: "auth-tests" }],
   eligibility: { recorded: true, promotable: false, can_approve: false, can_promote: false, approve_blockers: ["IMPACT_BLOCKED"], promote_blockers: ["IMPACT_BLOCKED", "NOT_APPROVED"], basis: "recorded" },
   tests: [{ test_id: "auth-tests", status: "failed", exit_code: 1, duration_ms: 5500, output_key: null, output: null, output_status: "not_recorded", output_truncated: false }],
@@ -96,14 +96,14 @@ describe("Security Replay rendering", () => {
     });
     const html = renderToStaticMarkup(<ReplayDetail v={view({
       attempts: [missing], run: null, contract: null, timeline: [],
-      evidence: { kind: "twinguard_artifacts", source: "s3", source_label: "S3", events_available: false, audit: null },
+      evidence: { kind: "impact_preview_artifacts", source: "s3", source_label: "S3", events_available: false, audit: null },
       authorization: { available: false, total: 0, allowed: 0, denied: 0, pending: 0, denied_requests: [] },
       limitations: ["No final audit export exists for this run in this evidence store."],
     })} />);
     expect(html).toContain("Evidence unavailable");
     expect(html).toContain("No trusted test result recorded");
     expect(html).toContain("This is missing evidence, not a passing result.");
-    expect(html).toContain("TwinGuard artifacts only");
+    expect(html).toContain("Impact Preview artifacts only");
     expect(html).toContain("Partial timeline");
     expect(html).toContain("No final audit export exists");
     expect(html).not.toContain("all 0 passed");
@@ -177,7 +177,7 @@ describe("Security Replay helpers and routing", () => {
   it("routes #/replay to the replay screen and keeps existing routes", () => {
     vi.stubGlobal("location", { hash: "#/replay/run_1" });
     const html = renderToStaticMarkup(<App />);
-    expect(html).toContain("TwinGuard Security Replay");
+    expect(html).toContain("Security Replay");
     expect(html).toContain('href="#/replay"');
     vi.stubGlobal("location", { hash: "#/runs/run_123/contract" });
     expect(renderToStaticMarkup(<App />)).toContain("Loading the contract for this run");

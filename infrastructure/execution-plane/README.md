@@ -1,4 +1,4 @@
-# TwinGuard S3 evidence
+# Impact Preview S3 evidence
 
 Deployed 2026-11-07 to the confirmed hackathon account `247495661854`, `us-east-1`:
 
@@ -27,7 +27,7 @@ Repeat the real S3 test explicitly:
 INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/Ali-Person-1 \
 INTENTLOCK_ARTIFACT_BUCKET=intentlock-evidence-247495661854-us-east-1 \
 INTENTLOCK_AWS_PROFILE=hackathon AWS_REGION=us-east-1 \
-.venv/bin/python -B -m unittest discover -s tests/sandbox -p test_twinguard_api.py -v
+.venv/bin/python -B -m unittest discover -s tests/sandbox -p test_impact_preview_api.py -v
 ```
 
 After a run reaches a terminal state, finalize its control-plane timeline (contract, run, events, impact reports, reviews and promotion records) with `.venv/bin/python -B packages/sandbox-provider/export_audit.py --run-id RUN_ID`. This writes the immutable `runs/RUN_ID/audit/final.json` object. Wait until the timeline is complete: a second export with changed contents will be refused rather than overwrite the audit. Ali's normal `create_app()` factory still defaults to its local artifact reader; the adapter above or an Ali-side reader selection is needed for the dashboard to serve S3 patches. No long-running API or promoter service was deployed to AWS; both remain local processes. The S3 bucket is live and retains its objects and versions. The existing local test can be run without AWS variables.

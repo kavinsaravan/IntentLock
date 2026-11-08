@@ -1,4 +1,4 @@
-"""MCP-facing TwinGuard preview and immutable evidence persistence."""
+"""MCP-facing patch preview and immutable evidence persistence."""
 import importlib.util
 import json
 import re
