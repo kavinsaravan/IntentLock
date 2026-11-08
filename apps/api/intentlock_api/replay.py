@@ -658,13 +658,14 @@ def _attempt_core(rec: Record, report: ImpactReport, status: dict[str, Any] | No
         auth = {"status": "unavailable", "basis": "Control-plane authorization events are not part of this evidence."}
     else:
         seq = _impact_event_seq(rec).get(report.impact_report_id)
-        prior = [e for e in _tool_events(rec) if e.tool == "propose_patch" and seq is not None and e.seq < seq]
+        prior = [e for e in _tool_events(rec) if e.tool == "propose_patch" and seq is not None and e.seq < seq
+                 and (e.arguments_redacted or {}).get("patch_sha256") == report.patch_sha256]
         chosen = ([e for e in prior if e.decision == "allow"] or prior)[-1:] if prior else []
         if seq is None:
             auth = {"status": "not_recorded", "basis": "No impact_report event references this report."}
         elif not chosen:
             auth = {"status": "not_recorded",
-                    "basis": f"No propose_patch tool request precedes impact event #{seq} in the recorded events."}
+                    "basis": f"No propose_patch tool request for this patch digest precedes impact event #{seq}."}
         else:
             e = chosen[0]
             auth = {"status": _decision_status(e), "seq": e.seq, "request_id": e.request_id, "reason_code": e.reason_code,
@@ -723,7 +724,10 @@ def _review_and_promotion(report: ImpactReport, status: dict[str, Any] | None):
         if pr is None:
             promotion = {"status": "unavailable", "basis": "The recorded promotion is malformed."}
         else:
-            approved = rv is not None and rv.decision == "approve"
+            approved = (rv is not None and rv.decision == "approve"
+                        and rv.patch_sha256 == report.patch_sha256 and rv.base_commit == report.base_commit
+                        and rv.contract_version == report.contract_version
+                        and pr.review_id == rv.review_id)
             matches = (pr.applied_patch_sha256 == report.patch_sha256 and pr.patch_sha256 == report.patch_sha256
                        and pr.base_commit == report.base_commit)
             st = pr.status

@@ -229,6 +229,48 @@ def test_forged_promotion_success_without_matching_digest_is_flagged(env):
     assert v["outcome"]["code"] == "promotion_failed"
 
 
+@pytest.mark.parametrize("field,value", [
+    ("patch_sha256", "f" * 64), ("base_commit", "f" * 40), ("review_id", "rev_other")])
+def test_promotion_requires_matching_approval_record(env, field, value):
+    propose(env, "r-patch")
+    rep = env.report("pass")
+    env.ingest(rep)
+    env.approve(rep)
+    env.promote(rep)
+    finish(env)
+    key, _ = export(env)
+    path = env.tmp / "artifacts" / key
+    data = json.loads(path.read_text())
+    if field == "review_id":
+        data["impacts"][0]["status"]["promotion"][field] = value
+    else:
+        data["impacts"][0]["status"]["review"][field] = value
+    path.chmod(0o600)
+    path.write_text(json.dumps(data))
+    v = historical(env).get(f"/api/replay/runs/{env.run['run_id']}").json()
+    assert v["attempts"][0]["promotion"]["status"] == "inconsistent"
+    assert v["outcome"]["code"] == "promotion_failed"
+    assert not any("identical to the approved patch" in c["claim"] for c in v["claims"])
+
+
+def test_patch_authorization_requires_matching_recorded_digest(env):
+    propose(env, "r-patch")
+    rep = env.report("pass")
+    env.ingest(rep)
+    env.approve(rep)
+    env.promote(rep)
+    finish(env)
+    key, _ = export(env)
+    path = env.tmp / "artifacts" / key
+    data = json.loads(path.read_text())
+    patch_event = next(e for e in data["events"] if e.get("tool") == "propose_patch")
+    patch_event["arguments_redacted"]["patch_sha256"] = "f" * 64
+    path.chmod(0o600)
+    path.write_text(json.dumps(data))
+    v = historical(env).get(f"/api/replay/runs/{env.run['run_id']}").json()
+    assert v["attempts"][0]["authorization"]["status"] == "not_recorded"
+
+
 # --------------------------------------------------------------------------------------- missing evidence
 def test_twinguard_only_evidence_reports_missing_control_plane_records(env):
     rep = blocked_report(env, "impact_only01")
