@@ -86,7 +86,8 @@ def reviewer_tokens_from_env(env=None) -> dict[str, str]:
 
 def register(app, store, artifacts, promoter, require_internal: Callable[[str | None], None],
              now: Callable[[], datetime], reviewers: set[str] | None,
-             reviewer_tokens: dict[str, str]) -> None:
+             reviewer_tokens: dict[str, str]) -> Callable[[str], dict]:
+    """Register the impact routes; returns the read-only review/promotion status function they use."""
     # ------------------------------------------------------------------ helpers
     def report_or_404(impact_id: str) -> ImpactReport:
         r = store.get_impact(impact_id)
@@ -320,3 +321,5 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
             "status": status, "reason_code": reason, "patch_sha256": fin.patch_sha256, "base_commit": fin.base_commit,
             "requested_by": body.requested_by, "review_id": fin.review_id})
         return {"promotion": PromotionRecord.model_validate(done or store.get_promotion(impact_id)).model_dump(mode="json", exclude_none=True)}
+
+    return get_status

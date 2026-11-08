@@ -16,6 +16,7 @@ from intentlock_policy.models import MissionContract, MissionContractDraft, Run
 from intentlock_policy.redact import sanitize_details
 
 from . import impact as impact_api
+from . import replay as replay_api
 from . import service
 from .artifacts import LocalDirArtifactReader
 from .promoter import PromoterClient
@@ -78,7 +79,7 @@ class IngestEventBody(BaseModel):
 def create_app(store: Any = None, launcher: Any = None, artifacts: Any = "env", promoter: Any = "env",
                reviewers: Any = "env", reviewer_tokens: Any = "env",
                invoker: Callable[[str, str], str] | None = None,
-               internal_token: str | None = None) -> FastAPI:
+               internal_token: str | None = None, replay_sources: Any = "env") -> FastAPI:
     store = store if store is not None else create_store_from_env()
     launcher = launcher if launcher is not None else AgentLauncher(store)
     artifacts = LocalDirArtifactReader.from_env() if artifacts == "env" else artifacts
@@ -304,5 +305,9 @@ def create_app(store: Any = None, launcher: Any = None, artifacts: Any = "env", 
                                 details=sanitize_details(body.details) if body.details else None)
         return ev.model_dump(mode="json")
 
-    impact_api.register(app, store, artifacts, promoter, require_internal, lambda: now(), reviewers, reviewer_tokens)
+    impact_status = impact_api.register(app, store, artifacts, promoter, require_internal, lambda: now(),
+                                        reviewers, reviewer_tokens)
+    sources, notes = replay_api.sources_from_env() if replay_sources == "env" else (replay_sources, [])
+    secrets = [token, *reviewer_tokens.values(), os.environ.get("INTENTLOCK_PROMOTER_TOKEN", "")]
+    replay_api.register(app, replay_api.Replay(sources, notes, store, impact_status, artifacts, secrets))
     return app

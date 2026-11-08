@@ -22,6 +22,18 @@ The script creates a fresh temporary copy of the demo repository and starts the 
 
 The verified browser demo uses the **local** MCP compatibility proxy, Docker sandbox, in-memory API store, and local artifacts. S3, DynamoDB, Lambda, CloudWatch, and Bedrock have been exercised separately as described in the [Person 2 handoff](docs/handoffs/person2-execution-plane.md). AgentCore Gateway and Code Interpreter are not deployed; the [PRD](intentlock-prd.md) permits the local fallback for the hackathon. The dashboard/API are not a public production deployment.
 
+## TwinGuard Security Replay
+
+`#/replay` in the dashboard is a read-only reconstruction of a recorded run: the security timeline, **Check 1 — action authorization** (the recorded IntentLock decision) beside **Check 2 — consequence verification** (the recorded TwinGuard report), the hash-verified patch, trusted-test results, review, promotion and the final audit reference. It reads persisted evidence, so it works after an API restart:
+
+| Source | Configure | Contains |
+| --- | --- | --- |
+| S3 evidence bucket (read-only) | `INTENTLOCK_REPLAY_BUCKET` + `AWS_PROFILE` (never `default`) | TwinGuard artifacts and `audit/final.json` exports |
+| Local artifact directory | `INTENTLOCK_ARTIFACT_DIR` (set by `demo/start_local_demo.sh`) | same layout, written by the local demo |
+| Live control-plane store | always on, by run ID | runs not yet exported (in-memory store: lost on restart) |
+
+Runs without an audit export show only their TwinGuard artifacts, and every missing record is labelled *Evidence unavailable* rather than inferred. `apps/api/record_replay_scenario_a.py` records a real authorized-read / denied-`.env` run without Docker or Kiro. Exact demo steps are in the [Person 1 handoff](docs/handoffs/person1-control-plane.md) (Milestone 11).
+
 ## Project map
 
 | Path | Purpose |
