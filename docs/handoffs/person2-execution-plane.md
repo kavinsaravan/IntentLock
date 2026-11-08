@@ -1,5 +1,13 @@
 # Handoff — Person 2 execution plane
 
+## 2026-11-07 post-merge verification of `main` (latest)
+
+`origin/main@de1d546` is a merge of `integration/main@a830c60`; their file trees were compared and are identical. Kavin verified the exact merged commit in a clean temporary worktree, rebuilt `intentlock-twinguard:local` from it, and used the integration virtual environment only for test dependencies. **All checks passed:** six real Docker tests (including no-network/read-only-root isolation, trusted-test blocking, unsafe patch blocking, Stop/tamper refusal, and reviewed safe promotion); one HTTP TwinGuard test with real S3 evidence (unsafe auth bypass blocked, corrected timeout patch promoted, final audit exported); and one authenticated real Kiro test with `INTENTLOCK_KIRO_GENERATE_PATCH=1` and S3 enabled (Kiro read and proposed through MCP, Docker ran trusted tests, the API recorded review, and the exact patch was promoted). Kiro was logged in; the S3 bucket was reachable.
+
+S3 object listing after the runs confirmed input archive, patch, test output, and impact objects for the real Kiro run under `runs/run_a488f91bff62/`; the corrected-patch test also wrote `runs/run_95c5e25ba191/audit/final.json`. The Kiro opt-in test does not export a final audit automatically. These checks used the local in-memory API and local HTTP promoter with real S3 artifact storage; they do not claim that the deployed Lambda/DynamoDB path or dashboard launched that same Kiro run. The earlier full combined Python suite passed on the identical integration file tree (439 passed, 3 skipped, 1 xpassed), and the dashboard tests/build passed there. No new code issue was found in the merged execution path.
+
+Follow-up: a single browser-driven dashboard launch → real Kiro → unsafe/corrected patch → review → promotion recording is still outstanding. Bedrock AgentCore is not implemented; Bedrock proposal has not had a live model invocation. Keep the current demo claims limited to the verified paths. This verification updates Person 2's handoff on `kavinperson2branch`; it does not change `main` code.
+
 ## 2026-11-07 latest integration verification — read first
 
 Ali's fixes (`074210c`) are merged into `integration/main@bcb40b7`. Kavin fast-forwarded the clean integration worktree to that commit and confirmed that it contains Person 2's supervisor fixes: SIGTERM handling, `os.killpg` permission fallback, and terminal run-state reporting. The real authenticated Kiro test then passed: Kiro generated a patch through MCP, TwinGuard executed it in Docker, and an API-driven human review promoted the exact patch. The full combined Python suite passed: **439 passed, 3 skipped, 1 xpassed**. The dashboard passed **9 Vitest tests** and `npm run build`.
