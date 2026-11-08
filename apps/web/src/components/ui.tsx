@@ -37,7 +37,7 @@ export function Spinner({ label }: { label: string }) {
   return <div className="spinner" role="status"><span className="dot" />{label}</div>;
 }
 
-const STEPS = ["Mission", "Contract", "Agent activity", "Impact review", "Audit"] as const;
+const STEPS = ["Mission", "Contract", "Agent activity", "Impact Preview", "Audit"] as const;
 export function Stepper({ active, runId }: { active: 0 | 1 | 2 | 3 | 4; runId?: string }) {
   const runPath = runId ? `#/runs/${encodeURIComponent(runId)}` : undefined;
   const hrefs = ["#/", runPath ? `${runPath}/contract` : "#/review", runPath,
