@@ -1,20 +1,28 @@
 # Handoff — Person 2 execution plane
 
-## Ali: which branch to use now (read first)
+## 2026-11-07 latest integration verification — read first
+
+Ali's fixes (`074210c`) are merged into `integration/main@bcb40b7`. Kavin fast-forwarded the clean integration worktree to that commit and confirmed that it contains Person 2's supervisor fixes: SIGTERM handling, `os.killpg` permission fallback, and terminal run-state reporting. The real authenticated Kiro test then passed: Kiro generated a patch through MCP, TwinGuard executed it in Docker, and an API-driven human review promoted the exact patch. The full combined Python suite passed: **439 passed, 3 skipped, 1 xpassed**. The dashboard passed **9 Vitest tests** and `npm run build`.
+
+A separate headless Chrome dashboard check used the integrated API, real Docker previews, and the real HTTP promoter. The unsafe auth-bypass patch produced `CRITICAL_TEST_FAILURE`; the dashboard displayed the finding and kept approval disabled. The corrected timeout patch passed the fixed authentication test; the dashboard reviewer entered a token, clicked **Approve exact patch** and **Request promotion**, saw `Promotion PROMOTED`, and the temporary Git repository contained the correction. This browser check used API-submitted previews rather than Kiro traffic in the same run; the Kiro-to-promotion path was verified separately above. The API and promoter used local memory/artifacts for this pass; earlier S3 evidence remains a separate verification.
+
+**Next:** Ali and Kavin review and approve `integration/main` for merge. Only after both approve, merge it once into `main`. A single browser-driven dashboard launch through real Kiro, followed by review and promotion in that same run, remains unrecorded. AgentCore remains unimplemented.
+
+## Ali: which branch to use now
 
 The instructions in this section supersede older branch directions below, which are retained as history. There is no need to merge `codex/ali-review-safeguards` again or pull Person 2's branch into Ali's branch: both are already represented in `integration/main`.
 
 | Branch | What Ali should do |
 | --- | --- |
-| `Ali-Person-1` | **Make and test the two Ali-owned fixes here:** diagnose the mocked DynamoDB concurrency failure in `apps/api/tests/test_store_contract.py`, and make the event-stream assertion in `tests/integration/test_agent_launch_e2e.py` use a stable event boundary. Commit and push those fixes on this branch. Update `docs/handoffs/person1-control-plane.md` with the cause, fix, and test results. |
+| `Ali-Person-1` | The mocked DynamoDB concurrency and SSE timing fixes are committed here at `074210c` and are already merged into `integration/main`. Continue future control-plane work here; update `docs/handoffs/person1-control-plane.md` with new results. |
 | `kavinperson2branch` | Read the latest Person 2 handoff and execution-plane code if needed. Do not commit Ali-owned fixes here. Person 2 owns this branch; its current code is already in `integration/main`. |
 | `codex/ali-review-safeguards` | No work needed. Its review-auth and Stop safeguards were already merged into `Ali-Person-1`; this branch is only historical. |
-| `integration/main` | After pushing Ali's fixes, fetch `origin/Ali-Person-1` and merge it **into this integration branch**. Run the full combined Python suite with both checkout variables pointing at the integration worktree, plus `npm test` and `npm run build` in `apps/web`. Push `integration/main` only after recording the result; do not make Ali-owned fixes directly on this branch. |
-| `main` | Leave unchanged until the integration checks pass and the team reviews the combined branch. Then merge `integration/main` into `main` once. |
+| `integration/main` | The current combined branch is tested as described above. Review it and record Ali's approval; do not make new Ali-owned fixes directly here. |
+| `main` | Leave unchanged until Ali and Kavin both approve the combined branch. Then merge `integration/main` into `main` once. |
 
-Current integration worktree on Kavin's machine: `/Users/kavins/Projects/IntentLock-integration`. Ali can use any clean checkout of `integration/main`; the checkout variables must point to that checkout. The unresolved test details and reproduction commands are in the next section.
+Current integration worktree on Kavin's machine: `/Users/kavins/Projects/IntentLock-integration`. Ali can use any clean checkout of `integration/main`; the checkout variables must point to that checkout. The prior failures and reproduction commands are preserved below as history.
 
-## 2026-11-07 integration merge gate — for Ali (current)
+## 2026-11-07 earlier integration merge gate — resolved by Ali (historical)
 
 Both branches are merged on `integration/main`; `.gitignore` was resolved by keeping both rule sets. `main` remains unchanged. On the integrated worktree, the full Python suite returned **437 passed, 2 failed, 3 skipped, 1 xpassed**. The dashboard's 9 Vitest tests and `npm run build` passed. The two Python failures are in Ali-owned tests and should be resolved or diagnosed before merging `integration/main` into `main`:
 
