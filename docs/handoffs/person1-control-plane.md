@@ -368,29 +368,47 @@ Two failures reported by Kavin after combining both branches into `integration/m
 - Fix (`test_agent_launch_e2e.py`): Takes a fresh event list snapshot as the stable boundary AFTER the run is terminal and the runner has exited. Compares SSE events only within that bounded range (`seq <= max_seq`). Additionally asserts SSE delivers at least as many events as the list (no events lost). Preserves event ordering, consistency, and `Last-Event-ID` verification.
 - Verification: test passes deterministically.
 
+### Milestone 9 — final integration verification and merge preparation (2026-11-07)
+Kavin completed all previously open Person 2 items: SIGTERM handling, `os.killpg` PermissionError fallback, run completion via `/internal/runs/{id}/state`, `TRUSTED_TEST_MODIFIED` enforcement in TwinGuard, Docker isolation (verified: `--network none`, read-only root, loopback-only interfaces), S3 evidence storage, and real authenticated Kiro patch workflow. His branch `kavinperson2branch@cc7a0ae` is fully merged into `integration/main@a830c60`.
+
+**Verification from integration/main@a830c60:**
+- Python: **433 passed, 6 failed (Docker not installed), 3 skipped, 1 xpassed**
+- Frontend: **9 vitest passed**, TypeScript clean, production build clean
+- PRD Scenarios A, B, C: all verified (policy engine + 26 cross-workstream integration tests + 5 E2E tests)
+- Credential scan: clean (only test fakes in diff)
+- Merge conflict check: none (clean `merge-tree` from `main`)
+- Kavin's Docker/Kiro verification (on his machine): real Kiro patch through MCP, Docker sandbox, trusted test blocking, S3 evidence, exact patch promotion — all passed
+
+**Kavin's completed items (verified from source and handoff):**
+| # | Item | Status |
+|---|---|---|
+| 1 | `os.killpg` PermissionError in `lifecycle.terminate_group` | FIXED: catches `(ProcessLookupError, PermissionError)` around both `killpg` calls |
+| 2 | SIGTERM handler in runner | FIXED: `signal.SIGTERM` handler sets interrupted event |
+| 3 | Run completion via `/internal/runs/{id}/state` | IMPLEMENTED: `client.finish()` reports `completed`/`failed` |
+| 4 | `TRUSTED_TEST_MODIFIED` enforcement in TwinGuard | IMPLEMENTED: `analyze.py` checks trusted paths and produces critical finding |
+| 5 | Docker sandbox isolation | IMPLEMENTED and VERIFIED (on Kavin's machine): `--network none`, `--read-only`, `--cap-drop ALL`, probe confirms no outbound network |
+| 6 | S3 evidence storage | IMPLEMENTED and VERIFIED: immutable local/S3 artifacts with SHA-256 checksums, real S3 put/read passed |
+| 7 | Real Kiro authenticated patch workflow | VERIFIED (on Kavin's machine): Kiro read through MCP, proposed through MCP, Docker sandbox, trusted tests, impact approved, exact patch promoted |
+
 ## 12. Known Issues and Blockers
-- **No dashboard→real-Kiro run yet.** Kiro is not installed/authenticated on this machine; the procedure and an opt-in test exist (`tests/integration/README.md`). Person 2's real-Kiro result predates the launcher integration.
-- **TwinGuard sandbox and promoter are implemented** on Person 2's branch (`kavinperson2branch@8b119a8`): Docker sandbox, impact analyzer, and patch promoter are all present and their own tests pass. However, real exact-patch promotion through Docker and `TRUSTED_TEST_MODIFIED` sandbox enforcement are unverified end to end (Docker not available here).
-- Person 2 issue tracker (7 items) in §9; items 1, 2, 3, 5 are open/unverified and affect stop reliability and the claim that all Kiro access is mediated.
-- Review authorization is an env allowlist of self-asserted names behind an unauthenticated public API (demo). Production needs real authentication (e.g. Cognito/IAM) before reviewer identity means anything.
-- Artifact reader is a LOCAL directory stand-in; no S3 reader/writer exists. The launcher is LOCAL-DEV only (subprocess on the API host).
-- **No real-AWS verification** of DynamoDB, Lambda, IAM or Bedrock; nothing deployed; Lambda account concurrency limit is 10; Bedrock model access is unverified (listing succeeded; invoke not tried).
-- Contract `status` is mutable by design; run expiry is lazy; stop-vs-tool TOCTOU window cannot be fully closed by the control plane.
-- Trusted-test patterns are tuned for the frozen TypeScript/Node scope.
-- Disk pressure: the dev machine's volume was at 99% during this session (a transient ENOSPC aborted one command). `.venv` (~280 MB) and `apps/web/node_modules` (~70 MB) are regenerable.
+- Review authorization is an env allowlist of self-asserted names behind an unauthenticated public API (demo only). Production needs real authentication (e.g. Cognito/IAM).
+- The launcher is LOCAL-DEV only (subprocess on the API host); not suitable for production.
+- Public API is unauthenticated; do not expose beyond localhost.
 - `intentlock-prd.md` is not in the repo (Person 2 gitignored their local copy).
-- **AWS access is unverified** until the `intentlock` profile exists; no deploy is possible before that. The exposed-key rotation (Kavin) must happen first.
-- Public API is unauthenticated (see README list); do not expose beyond localhost; Bedrock proposal endpoint has no rate limit.
-- Template has no S3 bucket; the Lambda zip bucket and Bedrock model id are open decisions.
+- Kiro itself runs outside Docker and has a constrained profile; full OS-level Kiro isolation is not established.
+- Single browser-driven dashboard launch through real Kiro, followed by review and promotion in that same run, remains unrecorded.
+- AgentCore remains unimplemented.
+- Contract `status` is mutable by design; run expiry is lazy; stop-vs-tool TOCTOU window cannot be fully closed by the control plane (promoter rechecks run status to narrow the window).
 
 ## 13. Decisions Needed
 **Owner (Ali/Kavin):**
 1. Bedrock model id; Lambda-zip bucket name; $25 budget alert; explicit approval to deploy.
-2. Confirm the shared-account ownership/naming proposal with Person 2.
-3. Choose credentials for the demo API: keep `intentlock` (admin) or create the TableAccessPolicy-only IAM user (README option B).
-**Person 2:** (a) call `/internal/runs/{id}/state` on agent completion/failure; (b) implement `TRUSTED_TEST_MODIFIED` enforcement in TwinGuard sandbox; (c) fix `os.killpg` PermissionError handling; (d) add SIGTERM handler; (e) run full demo on their machine with Docker + Kiro; (f) confirm the TwinGuard contract (§9).
+2. Choose credentials for the demo API: keep `intentlock` (admin) or create the TableAccessPolicy-only IAM user.
+3. Capture the single browser-driven dashboard demo recording before the hackathon.
 
 ## 14. Next Steps
-1. **Person 2 / Kavin (critical for demo):** run the full E2E demo on their machine with Docker + Kiro to verify Scenarios A/B/C through the real sandbox and promoter; call `/internal/runs/{id}/state`; implement `TRUSTED_TEST_MODIFIED`; fix the `killpg`/SIGTERM issues.
+1. **Merge `integration/main` into `main`** (pending Ali's approval — all checks pass).
+2. Capture browser-driven dashboard demo recording (Kiro + Docker + review + promotion in one run).
+3. Optional: Bedrock model configuration and Lambda redeploy for the demo.
 2. **Owner/Kavin decisions:** (a) confirm the budget recipients so ONE $25 alert can be created; (b) Bedrock model + approval for a first billable invocation; (c) optional code-only redeploy of the Lambda.
 3. **Before the demo:** run `measure_authorize_latency.py` on the demo machine/network; start the API with `apps/api/run_demo_api.sh`; give Person 2 the same `INTENTLOCK_INTERNAL_TOKEN` and `INTENTLOCK_API_URL=http://127.0.0.1:8787`.
