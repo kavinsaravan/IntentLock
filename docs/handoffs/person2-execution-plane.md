@@ -1,8 +1,22 @@
 # Handoff — Person 2 execution plane
 
+## Ali: which branch to use now (read first)
+
+The instructions in this section supersede older branch directions below, which are retained as history. There is no need to merge `codex/ali-review-safeguards` again or pull Person 2's branch into Ali's branch: both are already represented in `integration/main`.
+
+| Branch | What Ali should do |
+| --- | --- |
+| `Ali-Person-1` | **Make and test the two Ali-owned fixes here:** diagnose the mocked DynamoDB concurrency failure in `apps/api/tests/test_store_contract.py`, and make the event-stream assertion in `tests/integration/test_agent_launch_e2e.py` use a stable event boundary. Commit and push those fixes on this branch. Update `docs/handoffs/person1-control-plane.md` with the cause, fix, and test results. |
+| `kavinperson2branch` | Read the latest Person 2 handoff and execution-plane code if needed. Do not commit Ali-owned fixes here. Person 2 owns this branch; its current code is already in `integration/main`. |
+| `codex/ali-review-safeguards` | No work needed. Its review-auth and Stop safeguards were already merged into `Ali-Person-1`; this branch is only historical. |
+| `integration/main` | After pushing Ali's fixes, fetch `origin/Ali-Person-1` and merge it **into this integration branch**. Run the full combined Python suite with both checkout variables pointing at the integration worktree, plus `npm test` and `npm run build` in `apps/web`. Push `integration/main` only after recording the result; do not make Ali-owned fixes directly on this branch. |
+| `main` | Leave unchanged until the integration checks pass and the team reviews the combined branch. Then merge `integration/main` into `main` once. |
+
+Current integration worktree on Kavin's machine: `/Users/kavins/Projects/IntentLock-integration`. Ali can use any clean checkout of `integration/main`; the checkout variables must point to that checkout. The unresolved test details and reproduction commands are in the next section.
+
 ## 2026-11-07 integration merge gate — for Ali (current)
 
-Both branches are merged on `integration/main@e09f9ae`; `.gitignore` was resolved by keeping both rule sets. `main` remains unchanged. On the integrated worktree, the full Python suite returned **437 passed, 2 failed, 3 skipped, 1 xpassed**. The dashboard's 9 Vitest tests and `npm run build` passed. The two Python failures are in Ali-owned tests and should be resolved or diagnosed before merging `integration/main` into `main`:
+Both branches are merged on `integration/main`; `.gitignore` was resolved by keeping both rule sets. `main` remains unchanged. On the integrated worktree, the full Python suite returned **437 passed, 2 failed, 3 skipped, 1 xpassed**. The dashboard's 9 Vitest tests and `npm run build` passed. The two Python failures are in Ali-owned tests and should be resolved or diagnosed before merging `integration/main` into `main`:
 
 1. **Repeatable mocked DynamoDB concurrency failure:** `apps/api/tests/test_store_contract.py::test_event_seq_is_gapless_and_ordered_under_concurrency[dynamodb-moto]` raised `RuntimeError('dictionary changed size during iteration')` from one of 20 concurrent `append_event` calls. It failed again when run alone. The test currently collects worker exceptions without their tracebacks; capture the complete worker traceback first, then determine whether the fault is in Moto's in-memory concurrent implementation or the DynamoStore client path. Do not suppress the exception or weaken gap-free event assertions. If Moto-specific, document that evidence and keep a meaningful concurrency check; verify the production path separately if possible. Reproduce with `.venv/bin/python -B -m pytest -q 'apps/api/tests/test_store_contract.py::test_event_seq_is_gapless_and_ordered_under_concurrency[dynamodb-moto]'` in the integration worktree.
 2. **Event-stream timing assertion:** `tests/integration/test_agent_launch_e2e.py::test_launch_api_starts_real_runner_and_scenario_a_is_enforced` read the event list and then opened SSE; a late `agent_event` arrived between those reads, so SSE contained one more event. The test passed on an isolated rerun with `INTENTLOCK_PERSON2_CHECKOUT` set. Make the comparison against a stable event boundary or wait for the runner's final event before taking the list snapshot, while preserving the check that SSE and list deliver the same events. Reproduce with `INTENTLOCK_PERSON2_CHECKOUT=/absolute/path/to/integration/worktree .venv/bin/python -B -m pytest -q tests/integration/test_agent_launch_e2e.py::test_launch_api_starts_real_runner_and_scenario_a_is_enforced`.
