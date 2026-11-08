@@ -3,6 +3,7 @@ import { Badge } from "./components/ui";
 import { api } from "./lib/api";
 import type { Health } from "./lib/types";
 import { ActiveRun } from "./screens/ActiveRun";
+import { ApprovedContract } from "./screens/ApprovedContract";
 import { CreateMission, type DraftState } from "./screens/CreateMission";
 import { FinalAudit } from "./screens/FinalAudit";
 import { ImpactReview } from "./screens/ImpactReview";
@@ -37,11 +38,14 @@ function Header() {
 export default function App() {
   const hash = useHash();
   const [draft, setDraft] = useState<DraftState | null>(null);
-  const m = /^#\/runs\/([^/]+)(?:\/(impact|audit))?$/.exec(hash);
+  const m = /^#\/runs\/([^/]+)(?:\/(contract|impact|audit))?$/.exec(hash);
   let screen;
   if (m) {
     const id = decodeURIComponent(m[1]);
-    screen = m[2] === "impact" ? <ImpactReview key={id} runId={id} /> : m[2] === "audit" ? <FinalAudit key={id} runId={id} /> : <ActiveRun key={id} runId={id} />;
+    screen = m[2] === "contract" ? <ApprovedContract key={id} runId={id} />
+      : m[2] === "impact" ? <ImpactReview key={id} runId={id} />
+      : m[2] === "audit" ? <FinalAudit key={id} runId={id} />
+      : <ActiveRun key={id} runId={id} />;
   } else if (hash === "#/review") screen = <ReviewContract state={draft} />;
   else screen = <CreateMission onDraft={setDraft} />;
   return (<><Header /><main>{screen}</main></>);

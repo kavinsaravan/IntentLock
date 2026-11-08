@@ -39,8 +39,9 @@ export function Spinner({ label }: { label: string }) {
 
 const STEPS = ["Mission", "Contract", "Agent activity", "Impact review", "Audit"] as const;
 export function Stepper({ active, runId }: { active: 0 | 1 | 2 | 3 | 4; runId?: string }) {
-  const hrefs = ["#/", "#/review", runId ? `#/runs/${runId}` : undefined,
-    runId ? `#/runs/${runId}/impact` : undefined, runId ? `#/runs/${runId}/audit` : undefined];
+  const runPath = runId ? `#/runs/${encodeURIComponent(runId)}` : undefined;
+  const hrefs = ["#/", runPath ? `${runPath}/contract` : "#/review", runPath,
+    runPath ? `${runPath}/impact` : undefined, runPath ? `${runPath}/audit` : undefined];
   return (
     <ol className="stepper" aria-label="Workflow">
       {STEPS.map((s, i) => (

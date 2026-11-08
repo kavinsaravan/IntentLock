@@ -1,6 +1,10 @@
 # Handoff — Person 2 execution plane
 
-## 2026-11-07 judge demo preparation (latest)
+## 2026-11-07 dashboard run navigation fix (latest)
+
+From an existing run, the workflow stepper's Contract link now opens a read-only view of that run's approved contract at `#/runs/{run_id}/contract`. The Agent activity step and a visible return button both retain the run ID, so the operator can move back without creating another run. The pre-launch `#/review` route remains the editable draft. Verified with **11 web tests passed** (including two route/stepper regressions) and a successful production build. This is a dashboard UX change on `kavinperson2branch` made at Kavin's request; Ali should include it when updating the shared demo branch. No AWS resources changed.
+
+## 2026-11-07 judge demo preparation
 
 The root README now points to `docs/demo-runbook.md`; `demo/start_local_demo.sh` preflights Docker, authenticated Kiro, Python/web dependencies, and API token configuration, then creates a fresh temporary Git repository and starts the local promoter, API, and Vite dashboard. The operator runbook covers a five-minute judge walkthrough, recording, Bedrock fixture fallback, and honest AWS/AgentCore claims. A dry run passed: the API returned healthy local-memory state, `/api/launcher` reported `configured: true`, the dashboard served HTTP 200, and the stack stopped cleanly. The full browser/Kiro unsafe-then-safe run remains evidenced by `docs/demo-evidence/`; it was not re-recorded in this preparation pass. Before presenting, rehearse the script with the actual reviewer token and confirm the live Bedrock proposal if it will be shown.
 
