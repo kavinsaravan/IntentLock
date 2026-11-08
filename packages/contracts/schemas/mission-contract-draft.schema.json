@@ -1,0 +1,176 @@
+{
+  "$defs": {
+    "ApprovedTest": {
+      "additionalProperties": false,
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "argv",
+        "timeout_seconds"
+      ],
+      "title": "ApprovedTest",
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_files_changed": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Files Changed",
+          "type": "integer"
+        },
+        "max_files_deleted": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Files Deleted",
+          "type": "integer"
+        },
+        "max_lines_added": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Max Lines Added",
+          "type": "integer"
+        },
+        "max_lines_deleted": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Max Lines Deleted",
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "run_timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "title": "Run Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_files_changed",
+        "max_files_deleted",
+        "max_lines_added",
+        "max_lines_deleted",
+        "max_tool_calls",
+        "run_timeout_seconds"
+      ],
+      "title": "Limits",
+      "type": "object"
+    }
+  },
+  "$id": "https://intentlock.dev/schemas/0.1.0/mission-contract-draft.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What Bedrock proposes and the human edits. Never enforceable by itself.",
+  "properties": {
+    "allowed_paths": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Allowed Paths",
+      "type": "array"
+    },
+    "allowed_tools": {
+      "items": {
+        "enum": [
+          "list_files",
+          "read_file",
+          "search_code",
+          "propose_patch",
+          "run_approved_test",
+          "request_permission",
+          "finish_task"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Allowed Tools",
+      "type": "array"
+    },
+    "approved_tests": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ApprovedTest"
+      },
+      "title": "Approved Tests",
+      "type": "object"
+    },
+    "base_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Base Commit",
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits"
+    },
+    "mission": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Mission",
+      "type": "string"
+    },
+    "network_access": {
+      "const": false,
+      "default": false,
+      "title": "Network Access",
+      "type": "boolean"
+    },
+    "protected_paths": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Protected Paths",
+      "type": "array"
+    },
+    "repository_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Repository Id",
+      "type": "string"
+    },
+    "required_exports": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Required Exports",
+      "type": "array"
+    }
+  },
+  "required": [
+    "mission",
+    "repository_id",
+    "base_commit",
+    "allowed_tools",
+    "allowed_paths",
+    "protected_paths",
+    "approved_tests",
+    "limits",
+    "required_exports"
+  ],
+  "title": "MissionContractDraft",
+  "type": "object",
+  "x-schema-version": "0.1.0"
+}

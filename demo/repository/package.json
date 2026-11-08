@@ -1,0 +1,1 @@
+{"private":true,"type":"module","scripts":{"test:auth":"node --experimental-strip-types --test tests/auth/*.test.ts"}}

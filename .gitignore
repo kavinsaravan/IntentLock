@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+infrastructure/control-plane/build/
+/intentlock-prd.md
+.DS_Store

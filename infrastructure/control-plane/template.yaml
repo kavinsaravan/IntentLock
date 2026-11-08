@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  IntentLock control plane (minimal): one DynamoDB table + the deterministic authorization Lambda.
+  NOT DEPLOYED BY THIS REPO'S AUTOMATION. Review README.md, confirm account/region, then deploy manually.
+
+Parameters:
+  TableName:
+    Type: String
+    Default: intentlock-control-plane
+    AllowedPattern: "^[a-zA-Z0-9_.-]{3,255}$"
+  FunctionName:
+    Type: String
+    Default: intentlock-authorizer
+    AllowedPattern: "^[a-zA-Z0-9-_]{1,64}$"
+  CodeBucket:
+    Type: String
+    Description: S3 bucket that holds the zip produced by build_lambda.sh
+  CodeKey:
+    Type: String
+    Description: S3 key of the zip (for example intentlock-authorizer.zip)
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90]
+  EnableFunctionUrl:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Create an IAM-authenticated (AWS_IAM) Function URL. Default off; direct invoke needs none.
+
+Conditions:
+  UseFunctionUrl: !Equals [!Ref EnableFunctionUrl, "true"]
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${FunctionName}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
+
+  # Exactly what the store needs: no Scan, no DeleteItem, no table administration, this table only.
+  TableAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read/write access to the IntentLock control-plane table (attach to the API runner too)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ControlPlaneTable
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+            Resource: !GetAtt Table.Arn
+
+  AuthorizerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref TableAccessPolicy
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
+      Policies:
+        - PolicyName: WriteOwnLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${LogGroup.Arn}:*"
+
+  AuthorizerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: !Ref FunctionName
+      Description: IntentLock deterministic authorization (never calls Bedrock)
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Handler: intentlock_api.lambda_handler.handler
+      Role: !GetAtt AuthorizerRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref CodeKey
+      Environment:
+        Variables:
+          INTENTLOCK_STORE: dynamodb
+          INTENTLOCK_TABLE: !Ref Table
+      Tags:
+        - { Key: Project, Value: IntentLock }
+        - { Key: Owner, Value: person1-control-plane }
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Condition: UseFunctionUrl
+    Properties:
+      TargetFunctionArn: !GetAtt AuthorizerFunction.Arn
+      AuthType: AWS_IAM
+
+  # Attach this to the execution plane's IAM principal so it (and nothing else) can authorize.
+  InvokePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Permission to call the IntentLock authorizer
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt AuthorizerFunction.Arn
+          - !If
+            - UseFunctionUrl
+            - Effect: Allow
+              Action: lambda:InvokeFunctionUrl
+              Resource: !GetAtt AuthorizerFunction.Arn
+              Condition:
+                StringEquals: { "lambda:FunctionUrlAuthType": AWS_IAM }
+            - !Ref AWS::NoValue
+
+Outputs:
+  TableName: { Value: !Ref Table }
+  TableArn: { Value: !GetAtt Table.Arn }
+  FunctionArn: { Value: !GetAtt AuthorizerFunction.Arn }
+  TableAccessPolicyArn: { Value: !Ref TableAccessPolicy }
+  InvokePolicyArn: { Value: !Ref InvokePolicy }
+  FunctionUrl:
+    Condition: UseFunctionUrl
+    Value: !GetAtt FunctionUrl.FunctionUrl
