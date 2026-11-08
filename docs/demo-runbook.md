@@ -45,6 +45,8 @@ This is a **localhost** demo for security, platform, and DevOps teams that use c
 
 ## Five-minute judge walkthrough
 
+**Prompt 2 proof:** Judges should see all four required actions: launch Kiro, watch live tool traffic, deny a disallowed request, and press **Stop run**. The recorded unsafe-then-safe patch flow below demonstrates TwinGuard's additional value, but does not itself show the protected-path denial or a manual Stop. Rehearse a short separate run that requests `.env` and show `PROTECTED_PATH` in Agent activity; that denial automatically blocks its run. Start another run and press **Stop run** while it is active, then show the stopped state. Automated tests verify that later controlled requests receive `RUN_NOT_ACTIVE`; do not claim a later live request occurred unless it appears in the current run's audit. Keep the [previously verified patch screenshots](demo-evidence/README.md) available if Kiro takes a different path live. State clearly when evidence comes from a different run.
+
 | Time | Show | Say |
 | --- | --- | --- |
 | 0:00–0:35 | Create mission | “Coding agents help us ship, but security teams need proof of what they were allowed to do and what a patch would break.” |

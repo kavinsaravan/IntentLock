@@ -20,7 +20,30 @@ The script creates a fresh temporary copy of the demo repository and starts the 
 - **TwinGuard:** proposed TypeScript/Node patches run in a read-only-root, no-network Docker container against fixed tests. Protected paths and test changes are blocked. A passing patch still needs an authenticated human review and exact-hash promotion.
 - **Evidence:** local or private S3 artifact storage, immutable final audits, a DynamoDB-backed control-plane option, and a separately deployed authorization Lambda with CloudWatch authorization metrics.
 
-The verified browser demo uses the **local** MCP compatibility proxy, Docker sandbox, in-memory API store, and local artifacts. S3, DynamoDB, Lambda, CloudWatch, and Bedrock have been exercised separately as described in the [Person 2 handoff](docs/handoffs/person2-execution-plane.md). AgentCore Gateway and Code Interpreter are not deployed; the [PRD](intentlock-prd.md) permits the local fallback for the hackathon. The dashboard/API are not a public production deployment.
+The verified browser demo uses the **local** MCP compatibility proxy, Docker sandbox, in-memory API store, and local artifacts. S3, DynamoDB, Lambda, CloudWatch, and Bedrock have been exercised separately as described in the [Person 2 handoff](docs/handoffs/person2-execution-plane.md). AgentCore Gateway and Code Interpreter are not deployed; the local fallback is documented for the hackathon. The dashboard/API are not a public production deployment.
+
+## Architecture and demo boundary
+
+```mermaid
+flowchart LR
+    Human[Engineer] --> Web[Local dashboard]
+    Web --> API[Local control-plane API]
+    API --> Policy[Deterministic policy and run state]
+    Web -->|Approve and launch| Kiro[Kiro CLI]
+    Kiro -->|Controlled tools| MCP[IntentLock MCP compatibility proxy]
+    MCP -->|Authorize each request| API
+    MCP -->|Proposed Git patch| TG[TwinGuard Docker sandbox]
+    TG -->|Impact report and exact patch| API
+    Web -->|Human review| API
+    API -->|Approved patch digest and base commit| Promoter[Local patch promoter]
+    Promoter --> Demo[Temporary demo Git repository]
+    API -.->|Optional configured persistence| DynamoDB[(DynamoDB)]
+    TG -.->|Optional configured evidence| S3[(S3)]
+    API -.->|Optional contract draft| Bedrock[Amazon Bedrock]
+    Lambda[Deployed authorizer Lambda] -.->|Separately verified AWS path| DynamoDB
+```
+
+The solid arrows are the verified localhost product flow. Dotted arrows identify AWS components exercised separately; they are not a single deployed dashboard-to-AgentCore path. Kiro runs outside Docker. Docker isolates patch evaluation, and the promoter changes the temporary repository only after human approval.
 
 ## TwinGuard Security Replay
 
@@ -46,4 +69,4 @@ Runs without an audit export show only their TwinGuard artifacts, and every miss
 | `infrastructure` | AWS templates and deployment notes |
 | `docs/demo-evidence` | screenshots from the verified local flow |
 
-The product scope, frozen contracts, and security claims are in [the PRD](intentlock-prd.md) and [threat model](docs/threat-model.md).
+The supported scope and security claim boundaries are in the [threat model](docs/threat-model.md); the shared contract schemas are in [packages/contracts](packages/contracts/README.md).
