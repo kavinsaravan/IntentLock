@@ -32,6 +32,13 @@ def export(client, store, run_id):
             raise ValueError('INVALID_IMPACT_ID')
         impacts.append({'report': client.request('/api/impact/' + impact_id),
                         'status': client.request('/api/impact/' + impact_id + '/status')})
+    if run['status'] == 'completed':
+        for item in impacts:
+            report, state = item['report'], item['status']
+            review = state.get('review') or {}
+            promotion = state.get('promotion') or {}
+            if report.get('decision') != 'block' and review.get('decision') != 'reject' and promotion.get('status') not in ('promoted', 'refused', 'failed'):
+                raise ValueError('RUN_REVIEW_PENDING')
     record = {'run': run, 'contract': contract, 'events': events, 'impacts': impacts}
     data = json.dumps(record, sort_keys=True, separators=(',', ':')).encode()
     key = f'runs/{run_id}/audit/final.json'

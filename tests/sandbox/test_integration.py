@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'apps/mcp-server'))
@@ -54,6 +55,42 @@ class Integration(unittest.TestCase):
         process.stdin.write(json.dumps({'jsonrpc':'2.0','id':ident,'method':'tools/call','params':{'name':'read_file','arguments':{'path':path}}}) + '\n')
         process.stdin.flush()
         return json.loads(process.stdout.readline())
+
+    def call_tool(self, process, ident, name, arguments):
+        process.stdin.write(json.dumps({'jsonrpc':'2.0','id':ident,'method':'tools/call',
+                                        'params':{'name':name,'arguments':arguments}}) + '\n')
+        process.stdin.flush()
+        return json.loads(process.stdout.readline())
+
+    def test_new_mcp_tools_use_real_policy_and_filter_results(self):
+        run = self.new_run()
+        note_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(note_dir.cleanup)
+        env = os.environ | {'INTENTLOCK_API_URL':self.url,'INTENTLOCK_INTERNAL_TOKEN':'integration-only',
+                            'INTENTLOCK_ARTIFACT_DIR':note_dir.name}
+        p = subprocess.Popen([sys.executable,'-B',str(ROOT/'apps/mcp-server/server.py'),
+                              '--repository',str(ROOT/'demo/repository'),'--run-id',run['run_id'],
+                              '--contract-id',run['contract_id'],'--contract-version','1'],
+                             env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+        try:
+            listed = self.call_tool(p,1,'list_files',{'path':'src/auth'})
+            self.assertFalse(listed['result']['isError'])
+            names = [item['path'] for item in json.loads(listed['result']['content'][0]['text'])]
+            self.assertIn('src/auth/session.ts', names)
+            found = self.call_tool(p,2,'search_code',{'query':'timeoutSeconds','paths':['src/auth/**']})
+            self.assertFalse(found['result']['isError'])
+            self.assertTrue(json.loads(found['result']['content'][0]['text']))
+            blocked = self.call_tool(p,3,'search_code',{'query':'secret','paths':['.env*']})
+            self.assertTrue(blocked['result']['isError'])
+            permission = self.call_tool(p,4,'request_permission',{'tool':'read_file','resource':'.env','reason':'need data'})
+            summary = self.call_tool(p,5,'finish_task',{'summary':'done'})
+            self.assertFalse(permission['result']['isError'])
+            self.assertFalse(summary['result']['isError'])
+            for response in (permission, summary):
+                key = json.loads(response['result']['content'][0]['text'])['evidence_key']
+                self.assertTrue((Path(note_dir.name) / key).exists())
+        finally:
+            p.stdin.close(); p.wait(timeout=5); p.stdout.close()
 
     def test_stdio_allow_block_replay(self):
         run = self.new_run()
@@ -109,6 +146,17 @@ class Integration(unittest.TestCase):
                 self.assertEqual(self.client.run(run['run_id'])['status'], expected)
                 events = self.client.request('/api/runs/'+run['run_id']+'/events')['events']
                 self.assertEqual(sum(e['event_type'] == 'run_completed' for e in events), 1)
+
+    def test_supervisor_auto_exports_final_audit(self):
+        run = self.new_run()
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'INTENTLOCK_ARTIFACT_DIR': folder}, clear=False):
+            result = supervise([sys.executable, '-c', 'raise SystemExit(0)'],
+                               str(ROOT), self.client, run['run_id'], run['contract_id'], 1)
+            self.assertEqual(result, 0)
+            saved = Path(folder) / 'runs' / run['run_id'] / 'audit' / 'final.json'
+            self.assertTrue(saved.exists())
+            data = json.loads(saved.read_text())
+            self.assertEqual(data['run']['status'], 'completed')
 
     def test_sigterm_handler_reports_failure_and_cleans_child(self):
         run = self.new_run()

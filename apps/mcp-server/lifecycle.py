@@ -1,5 +1,6 @@
 """Supervise Kiro, report terminal state, and clean up its process group."""
 import os
+from pathlib import Path
 import signal
 import subprocess
 import threading
@@ -101,6 +102,17 @@ def supervise(command, cwd, client, run_id, contract_id, version, poll_seconds=0
             client.event(run_id, outcome)
         except ControlPlaneError:
             pass
+        if os.environ.get('INTENTLOCK_ARTIFACT_BUCKET') or os.environ.get('INTENTLOCK_ARTIFACT_DIR'):
+            try:
+                import importlib.util
+                source = Path(__file__).resolve().parents[2] / 'packages/sandbox-provider/export_audit.py'
+                spec = importlib.util.spec_from_file_location('intentlock_export_audit', source)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                module.export(client, module.artifacts.from_env(), run_id)
+            except Exception:
+                # Audit export is best effort; never rewrite an authoritative run state.
+                pass
         if previous_sigterm is not None:
             signal.signal(signal.SIGTERM, previous_sigterm)
     return result_code

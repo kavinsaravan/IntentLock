@@ -42,3 +42,28 @@ def preview(client, repository, run_id, contract_id, version, patch_text):
     client.request('/internal/impact',report)
     return {'impact_report_id':report['impact_report_id'],'decision':report['decision'],
             'patch_sha256':digest,'findings':report['findings']}
+
+
+def approved_test(client, repository, run_id, contract_id, version, test_id):
+    contract = client.request(f'/api/contracts/{contract_id}/versions/{version}')
+    if contract['contract_id'] != contract_id or contract['version'] != version or contract['status'] != 'active':
+        raise ValueError('CONTRACT_NOT_ACTIVE')
+    if test_id != 'auth-tests' or contract['approved_tests'].get(test_id, {}).get('argv') != ['npm', 'run', 'test:auth']:
+        raise ValueError('TEST_NOT_APPROVED')
+    base = local.clean_base(repository)
+    if base != contract['base_commit']:
+        raise ValueError('STALE_BASE_COMMIT')
+    result = local.run_approved_test(repository, base, timeout=min(90, contract['approved_tests'][test_id]['timeout_seconds'] + 15))
+    key = f'runs/{run_id}/tests/{test_id}_{uuid.uuid4().hex[:12]}.txt'
+    artifacts.from_env().put(key, result['test_output'])
+    return {'test_id': test_id, 'status': 'passed' if result['test_exit'] == 0 else 'failed',
+            'exit_code': result['test_exit'], 'duration_ms': result['duration_ms'], 'output_s3_key': key}
+
+
+def record_agent_note(client, run_id, category, data):
+    if category not in ('permissions', 'summaries'):
+        raise ValueError('INVALID_NOTE_CATEGORY')
+    key = f'runs/{run_id}/agent/{category}/{uuid.uuid4().hex[:12]}.json'
+    artifacts.from_env().put(key, json.dumps(data, sort_keys=True, separators=(',', ':')).encode())
+    client.event(run_id, f'Agent {category} evidence: {key}')
+    return {'evidence_key': key, 'access_granted': False}

@@ -216,3 +216,10 @@ class TwinGuardApi(unittest.TestCase):
         promotion=self.post(path+'/promote',{'requested_by':'reviewer','patch_sha256':report['patch_sha256']})
         self.assertEqual(promotion['promotion']['status'],'promoted',promotion)
         self.assertIn('timeoutSeconds * 1000',(self.repo/'src/auth/session.ts').read_text())
+        audit_file = self.artifacts / 'runs' / run['run_id'] / 'audit' / 'final.json'
+        for _ in range(40):
+            if audit_file.exists(): break
+            time.sleep(.1)
+        self.assertTrue(audit_file.exists())
+        audit_data = json.loads(audit_file.read_text())
+        self.assertTrue(any(e['event_type'] == 'promotion' for e in audit_data['events']))

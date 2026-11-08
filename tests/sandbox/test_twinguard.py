@@ -34,6 +34,12 @@ class TwinGuardTests(unittest.TestCase):
         self.assertTrue(proof['writeDenied'])
         self.assertIn(proof['networkError'], ('ENETUNREACH', 'EHOSTUNREACH'))
 
+    def test_approved_test_runs_in_isolated_snapshot(self):
+        result = local.run_approved_test(self.repo, self.base)
+        self.assertIsInstance(result['test_exit'], int)
+        self.assertGreater(result['duration_ms'], 0)
+        self.assertEqual(local.clean_base(self.repo), self.base)
+
     def test_repository_archive_is_stable_and_rejects_credentials(self):
         one=local.archive_repository(self.repo,self.base)
         self.assertEqual(one,local.archive_repository(self.repo,self.base))

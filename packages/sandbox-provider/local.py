@@ -85,6 +85,34 @@ def snapshot(repo, base, target):
         tar.extractall(target, filter='data')
 
 
+def run_approved_test(repo, base, *, timeout=60):
+    """Run the one frozen auth test in a fresh, networkless Docker snapshot."""
+    if clean_base(repo) != base:
+        raise SandboxError('STALE_BASE_COMMIT')
+    with tempfile.TemporaryDirectory(prefix='intentlock-test-') as tmp:
+        root = Path(tmp)
+        inp, out = root / 'input', root / 'out'
+        inp.mkdir(); out.mkdir(); out.chmod(0o777)
+        snapshot(repo, base, inp)
+        runner = Path(__file__).with_name('test_runner.sh').resolve()
+        container = 'intentlock-test-' + uuid.uuid4().hex[:16]
+        cmd = ['docker', 'run', '--rm', *isolation_flags(container),
+               '--mount', f'type=bind,src={inp},dst=/input,readonly',
+               '--mount', f'type=bind,src={out},dst=/out',
+               '--mount', f'type=bind,src={runner},dst=/runner.sh,readonly', IMAGE, 'sh', '/runner.sh']
+        started = time.monotonic()
+        try:
+            process = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            subprocess.run(['docker', 'rm', '-f', container], capture_output=True, timeout=10)
+            raise SandboxError('SANDBOX_TIMEOUT') from None
+        if process.returncode or not (out / 'test-exit.txt').exists():
+            raise SandboxError('APPROVED_TEST_FAILED_TO_RUN')
+        return {'test_exit': int((out / 'test-exit.txt').read_text()),
+                'test_output': (out / 'test-output.txt').read_bytes()[:65536],
+                'duration_ms': int((time.monotonic() - started) * 1000)}
+
+
 def execute(repo, base, patch, *, run_test=True, timeout=60):
     if not isinstance(patch, bytes) or not patch or len(patch) > MAX_PATCH:
         raise SandboxError('invalid patch size')
