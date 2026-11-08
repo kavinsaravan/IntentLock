@@ -2,6 +2,12 @@
 
 > Historical work log: this file preserves the former feature name, branch names, and test paths used at the time. The current product calls the feature **Impact Preview**; use the root README and current source paths for setup.
 
+## 2026-11-08 multi-denial demo fixture
+
+- Added two harmless TypeScript source files, `src/billing/invoice.ts` and `src/notifications/digest.ts`, to the demo repository. Together with the existing payments file, they give Kiro three distinct real out-of-scope targets for an authorization rehearsal. The contract should allow only `src/auth/session.ts` and `read_file`; the exact mission is in the demo runbook. Each attempted read is denied by `PATH_NOT_ALLOWED` before file access. Kiro's choice of calls remains nondeterministic, so rehearse rather than claim a guaranteed count.
+- Verified the new files import and execute with Node. The existing auth test fails on the intentionally buggy starting fixture, as expected. Demo preflight passed on alternate ports; a fresh stack is available at `http://localhost:15173/` while the previous `:5173` stack remains available with its existing run history.
+- Branch: `kavinperson2branch`. Next: review the added fixture and runbook, rehearse the three-denial mission in the fresh stack, and merge this branch into `main` after review if it will be used for judging.
+
 ## 2026-11-08 feature rename: Impact Preview
 
 - Renamed the dashboard feature, current documentation, internal Python module and tests, replay evidence labels, shared fixture key, and local Docker image tag from the former name to **Impact Preview**. Security Replay remains a feature of IntentLock.
