@@ -34,6 +34,19 @@ class TwinGuardTests(unittest.TestCase):
         self.assertTrue(proof['writeDenied'])
         self.assertIn(proof['networkError'], ('ENETUNREACH', 'EHOSTUNREACH'))
 
+    def test_approved_test_runs_in_isolated_snapshot(self):
+        result = local.run_approved_test(self.repo, self.base)
+        self.assertIsInstance(result['test_exit'], int)
+        self.assertGreater(result['duration_ms'], 0)
+        self.assertEqual(local.clean_base(self.repo), self.base)
+
+    def test_bad_patch_gets_actionable_closed_error(self):
+        patch = self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        malformed = patch.replace(b'timeoutSeconds;', b'timeoutSecondsThatIsNotThere;')
+        with self.assertRaisesRegex(local.SandboxError, 'PATCH_DOES_NOT_APPLY'):
+            local.execute(self.repo, self.base, malformed)
+        self.assertEqual(local.clean_base(self.repo), self.base)
+
     def test_repository_archive_is_stable_and_rejects_credentials(self):
         one=local.archive_repository(self.repo,self.base)
         self.assertEqual(one,local.archive_repository(self.repo,self.base))
@@ -79,6 +92,26 @@ class TwinGuardTests(unittest.TestCase):
                 self.assertEqual(report['decision'],'block')
                 self.assertIn('TRUSTED_TEST_MODIFIED', [finding['code'] for finding in report['findings']])
                 self.assertEqual(git(self.repo,'status','--porcelain'),'')
+
+    def test_dependency_only_package_change_requires_review_and_runs_tests(self):
+        source = self.repo/'src/auth/session.ts'
+        source.write_text(source.read_text().replace('>= timeoutSeconds;', '>= timeoutSeconds * 1000;'))
+        git(self.repo,'add','src/auth/session.ts')
+        git(self.repo,'commit','-qm','fixed baseline')
+        self.base = git(self.repo,'rev-parse','HEAD')
+        self.contract['base_commit'] = self.base
+        target = self.repo/'package.json'
+        original = target.read_text()
+        self.assertIn(',"scripts":', original)
+        target.write_text(original.replace(',"scripts":', ',"dependencies":{"left-pad":"1.3.0"},"scripts":'))
+        patch = subprocess.check_output(['git','-C',str(self.repo),'diff'])
+        target.write_text(original)
+        result = local.execute(self.repo,self.base,patch)
+        report = impact.analyze(result,self.contract | {'allowed_paths':['package.json']},'run-test','sandbox-test')
+        self.assertEqual(result['test_exit'], 0, result['test_output'][-500:].decode(errors='replace'))
+        self.assertEqual(report['decision'], 'review_required')
+        self.assertEqual([(f['code'],f['severity']) for f in report['findings']], [('DEPENDENCY_CHANGE','medium')])
+        self.assertEqual(git(self.repo,'status','--porcelain'),'')
 
     def test_stopped_and_tampered_promotion_refused(self):
         patch=self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')

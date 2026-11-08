@@ -4,6 +4,7 @@ import tempfile
 import sys
 import unittest
 from unittest.mock import Mock
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'apps/mcp-server'))
 spec = importlib.util.spec_from_file_location('gateway', Path(__file__).resolve().parents[2] / 'apps/mcp-server/server.py')
@@ -59,6 +60,26 @@ class GatewayTests(unittest.TestCase):
         from control_plane import Client, ControlPlaneError
         with self.assertRaises(ControlPlaneError):
             Client('', '')
+
+    def test_listing_and_search_hide_protected_and_disallowed_paths(self):
+        (self.root / 'src' / 'auth').mkdir(parents=True)
+        (self.root / 'src' / 'auth' / 'session.ts').write_text('const token = 1;\n')
+        (self.root / 'src' / 'auth' / '.env.local').write_text('token=secret')
+        (self.root / 'src' / 'auth' / 'hidden').mkdir()
+        (self.root / 'src' / 'auth' / 'hidden' / 'secret.ts').write_text('token=secret')
+        contract = {'contract_id':'c','version':1,'status':'active',
+                    'allowed_paths':['src/auth/**'], 'protected_paths':['src/auth/hidden/**']}
+        client = Mock()
+        client.request.return_value = contract
+        server = g.Server(self.repo, Mock(), 'r', 'c', 1)
+        with patch.object(g.Client, 'from_env', return_value=client):
+            listing = server.dispatch({'method':'tools/call','params':{'name':'list_files','arguments':{'path':'src/auth'}}})
+            found = server.dispatch({'method':'tools/call','params':{'name':'search_code','arguments':{'query':'token','paths':['src/auth/**']}}})
+        import json
+        listed = json.loads(listing['content'][0]['text'])
+        matches = json.loads(found['content'][0]['text'])
+        self.assertEqual([p['path'] for p in listed], ['src/auth/session.ts'])
+        self.assertEqual([p['path'] for p in matches], ['src/auth/session.ts'])
 
 if __name__ == '__main__':
     unittest.main()

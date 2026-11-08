@@ -40,3 +40,14 @@ export function findImpactReportId(events: EventRec[]): string | null {
   }
   return null;
 }
+
+/** All report ids in newest-first order so a reviewer can inspect earlier blocked attempts. */
+export function impactReportIds(events: EventRec[]): string[] {
+  const ids: string[] = [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    const id = e.event_type === "impact_report" ? e.details?.["impact_report_id"] : null;
+    if (typeof id === "string" && id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}

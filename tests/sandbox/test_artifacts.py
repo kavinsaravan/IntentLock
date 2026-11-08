@@ -102,3 +102,20 @@ class Artifacts(unittest.TestCase):
             self.assertEqual(key, 'runs/run_01/audit/final.json')
             self.assertEqual(digest, hashlib.sha256(store.read(key)).hexdigest())
             self.assertEqual(audit.export(client, store, 'run_01'), (key, digest))
+
+    def test_final_audit_waits_for_human_promotion(self):
+        class Client:
+            def run(self, run_id):
+                return {'run_id': run_id, 'status': 'completed', 'contract_id': 'contract_01', 'contract_version': 1}
+            def request(self, path):
+                if path.endswith('/events'):
+                    return {'events': [{'event_type': 'impact_report', 'details': {'impact_report_id': 'impact_01'}}]}
+                if path.endswith('/status'):
+                    return {'review': None, 'promotion': None}
+                if path.startswith('/api/impact/'):
+                    return {'decision': 'pass'}
+                return {'id': path}
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(ValueError, 'RUN_REVIEW_PENDING'):
+                audit.export(Client(), artifacts.LocalArtifacts(root), 'run_01')
+            self.assertFalse((Path(root) / 'runs/run_01/audit/final.json').exists())

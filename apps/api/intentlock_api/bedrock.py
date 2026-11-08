@@ -20,9 +20,10 @@ Return ONLY one JSON object (no prose, no code fences) with exactly these keys:
 mission (string), allowed_tools (subset of list_files, read_file, search_code,
 propose_patch, run_approved_test), allowed_paths (repo-relative globs),
 protected_paths (globs; always include ".env*", ".git/**", ".github/**", "infra/**"),
-approved_tests (object: test_id -> {argv: [string], timeout_seconds: int<=600}),
+approved_tests (for this TypeScript/Node demo, exactly one entry named "auth-tests"
+with argv ["npm","run","test:auth"] and timeout_seconds 60),
 limits ({max_files_changed, max_files_deleted, max_lines_added, max_lines_deleted,
-max_tool_calls, run_timeout_seconds<=600}), required_exports (list of strings),
+max_tool_calls, run_timeout_seconds<=600}), required_exports (include "verifyToken"),
 network_access (always false). Be as narrow as the task allows."""
 
 
@@ -50,7 +51,13 @@ def propose_draft(task: str, repository_id: str, base_commit: str,
             obj = _extract_json(raw)
             # Never trust the model for repository identity or network access.
             obj["repository_id"], obj["base_commit"], obj["network_access"] = repository_id, base_commit, False
-            return MissionContractDraft.model_validate(obj), attempt
+            draft = MissionContractDraft.model_validate(obj)
+            tests = draft.approved_tests
+            if set(tests) != {"auth-tests"} or tests["auth-tests"].argv != ["npm", "run", "test:auth"]:
+                raise ValueError("approved_tests must contain only auth-tests with npm run test:auth")
+            if "verifyToken" not in draft.required_exports:
+                raise ValueError("required_exports must include verifyToken")
+            return draft, attempt
         except (ValueError, ValidationError) as e:
             last = str(e)[:300]
     raise ProposalError("Bedrock output was not a valid mission contract after 2 attempts")
@@ -68,7 +75,11 @@ def bedrock_invoker() -> Callable[[str, str], str]:
     def invoke(system: str, user: str) -> str:
         resp = client.converse(modelId=model_id, system=[{"text": system}],
                                messages=[{"role": "user", "content": [{"text": user}]}],
-                               inferenceConfig={"maxTokens": 1500, "temperature": 0})
-        return resp["output"]["message"]["content"][0]["text"]
+                               inferenceConfig={"maxTokens": 1500})
+        # Some models emit reasoningContent before the user-visible text block.
+        for block in resp["output"]["message"]["content"]:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                return block["text"]
+        raise ProposalError("Bedrock returned no text proposal")
 
     return invoke
