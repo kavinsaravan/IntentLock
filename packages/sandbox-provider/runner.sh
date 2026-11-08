@@ -9,8 +9,11 @@ git config user.name TwinGuard
 git add .
 git commit -qm baseline
 [ ! -f package.json ] || cp package.json /out/package-before.json
-git apply --check /patch/input.patch
-git apply /patch/input.patch
+if ! git apply --check --recount /patch/input.patch >/dev/null 2>&1; then
+  touch /out/patch-invalid
+  exit 2
+fi
+git apply --recount /patch/input.patch
 [ ! -f package.json ] || cp package.json /out/package-after.json
 git add -N .
 git diff --binary > /out/result.patch

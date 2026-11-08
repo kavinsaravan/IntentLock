@@ -144,6 +144,8 @@ def execute(repo, base, patch, *, run_test=True, timeout=60):
             except (OSError, subprocess.TimeoutExpired):
                 pass
             raise SandboxError('SANDBOX_TIMEOUT') from None
+        if (out / 'patch-invalid').exists():
+            raise SandboxError('PATCH_DOES_NOT_APPLY')
         if p.returncode:
             raise SandboxError('SANDBOX_PATCH_FAILED')
         return {'patch': (out/'result.patch').read_bytes(), 'numstat': (out/'numstat.txt').read_text(),

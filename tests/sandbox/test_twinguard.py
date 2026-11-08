@@ -40,6 +40,13 @@ class TwinGuardTests(unittest.TestCase):
         self.assertGreater(result['duration_ms'], 0)
         self.assertEqual(local.clean_base(self.repo), self.base)
 
+    def test_bad_patch_gets_actionable_closed_error(self):
+        patch = self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        malformed = patch.replace(b'timeoutSeconds;', b'timeoutSecondsThatIsNotThere;')
+        with self.assertRaisesRegex(local.SandboxError, 'PATCH_DOES_NOT_APPLY'):
+            local.execute(self.repo, self.base, malformed)
+        self.assertEqual(local.clean_base(self.repo), self.base)
+
     def test_repository_archive_is_stable_and_rejects_credentials(self):
         one=local.archive_repository(self.repo,self.base)
         self.assertEqual(one,local.archive_repository(self.repo,self.base))

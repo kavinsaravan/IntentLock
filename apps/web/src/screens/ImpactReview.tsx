@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { DiffView } from "../components/DiffView";
 import { Badge, Card, Notice, Spinner, Stepper } from "../components/ui";
 import { api, ApiError } from "../lib/api";
-import { findImpactReportId, toolEvents } from "../lib/events";
+import { findImpactReportId, impactReportIds, toolEvents } from "../lib/events";
 import { shortSha } from "../lib/format";
 import type { ImpactReport, ImpactStatus } from "../lib/types";
 import { useRunLive } from "../lib/useRunLive";
@@ -21,8 +21,10 @@ const why = (codes: string[]) => codes.map((c) => BLOCKER_TEXT[c] ?? c).join("; 
 export function ImpactReview({ runId }: { runId: string }) {
   const { events } = useRunLive(runId);
   const detected = findImpactReportId(events);
+  const reports = impactReportIds(events);
+  const [selected, setSelected] = useState("");
   const [manual, setManual] = useState("");
-  const id = detected ?? (manual.trim() || null);
+  const id = selected || detected || manual.trim() || null;
   const [rep, setRep] = useState<Load<ImpactReport>>({ s: "idle" });
   const [patch, setPatch] = useState<Load<string>>({ s: "idle" });
   const [status, setStatus] = useState<ImpactStatus | null>(null);
@@ -69,6 +71,15 @@ export function ImpactReview({ runId }: { runId: string }) {
   return (
     <>
       <Stepper active={3} runId={runId} />
+      {reports.length > 1 && <Card title="Patch attempts">
+        <label className="field"><span>Impact report to inspect</span>
+          <select value={id ?? ""} onChange={(e) => setSelected(e.target.value)}>
+            {reports.map((reportId, index) => <option key={reportId} value={reportId}>
+              {index === 0 ? "Latest" : `Earlier ${index}`} · {reportId}
+            </option>)}
+          </select>
+        </label>
+      </Card>}
       <Card title="Decisions">
         <div className="grid2">
           <div><h3>IntentLock (authorization)</h3>
