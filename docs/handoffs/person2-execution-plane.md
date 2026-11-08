@@ -1,6 +1,10 @@
 # Handoff — Person 2 execution plane
 
-## 2026-11-07 rejected-patch final audit (latest)
+## 2026-11-07 judge demo preparation (latest)
+
+The root README now points to `docs/demo-runbook.md`; `demo/start_local_demo.sh` preflights Docker, authenticated Kiro, Python/web dependencies, and API token configuration, then creates a fresh temporary Git repository and starts the local promoter, API, and Vite dashboard. The operator runbook covers a five-minute judge walkthrough, recording, Bedrock fixture fallback, and honest AWS/AgentCore claims. A dry run passed: the API returned healthy local-memory state, `/api/launcher` reported `configured: true`, the dashboard served HTTP 200, and the stack stopped cleanly. The full browser/Kiro unsafe-then-safe run remains evidenced by `docs/demo-evidence/`; it was not re-recorded in this preparation pass. Before presenting, rehearse the script with the actual reviewer token and confirm the live Bedrock proposal if it will be shown.
+
+## 2026-11-07 rejected-patch final audit
 
 The control plane's authenticated rejection endpoint now asks the local promoter to finalize the run audit. The promoter accepts this request only with its service token, re-reads the authoritative impact and review state, and writes `runs/{run_id}/audit/final.json` through the configured immutable local/S3 artifact store after the run is terminal. Repeating the same rejection retries finalization. A still-active run queues finalization until it becomes terminal. The supervisor now emits its last agent event before reporting terminal state, so the finalizer cannot observe completion before that event is recorded. No public API authentication, IAM, CloudWatch, hosting, or AWS deployment changes were made; Kavin deferred that production-hardening work for the hackathon.
 
