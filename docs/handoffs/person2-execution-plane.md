@@ -1,6 +1,12 @@
 # Handoff — Person 2 execution plane
 
-## 2026-11-07 combined demo verification and AWS status (read first)
+## 2026-11-07 rejected-patch final audit (latest)
+
+The control plane's authenticated rejection endpoint now asks the local promoter to finalize the run audit. The promoter accepts this request only with its service token, re-reads the authoritative impact and review state, and writes `runs/{run_id}/audit/final.json` through the configured immutable local/S3 artifact store after the run is terminal. Repeating the same rejection retries finalization. A still-active run queues finalization until it becomes terminal. The supervisor now emits its last agent event before reporting terminal state, so the finalizer cannot observe completion before that event is recorded. No public API authentication, IAM, CloudWatch, hosting, or AWS deployment changes were made; Kavin deferred that production-hardening work for the hackathon.
+
+Verification: real local HTTP API + Docker tests covered rejection after completion, rejection before completion, missing promoter token, and an unreviewed report. `test_twinguard_api.py`: **6 passed, 1 real-Kiro opt-in skipped**. Supervisor integration: **6 passed**. API impact/reviewer authentication tests: **114 passed**. The prior real authenticated Kiro patch workflow passed before this change; it was not rerun for this rejection-only path. The API and promoter must share a configured artifact store for automatic export; when the promoter is unavailable, the review stays recorded and the response reports `audit_status: unavailable` so the same rejection can be retried.
+
+## 2026-11-07 combined demo verification and AWS status
 
 Person 2 merged `origin/main@de1d546` into `kavinperson2branch` at `26cd5fe`, retaining all of Ali's combined control-plane code and the prior Person 2 work. The pre-existing staged `AGENTS.md` was stashed before the merge because Git refused to overwrite it; the merge brought in the exact same blob from main, and the backup stash remains available.
 

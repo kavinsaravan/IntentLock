@@ -141,6 +141,62 @@ class TwinGuardApi(unittest.TestCase):
         self.assertEqual(audit_key,f"runs/{run['run_id']}/audit/final.json")
         self.assertEqual(len(audit_digest),64)
 
+    def test_rejected_completed_patch_exports_final_audit(self):
+        contract, run = self.run_contract()
+        safe = self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        report = preview(self.client, self.repo, run['run_id'], contract['contract_id'], contract['version'], safe)
+        self.assertEqual(report['decision'], 'pass')
+        self.client.request('/internal/runs/' + run['run_id'] + '/state', {'status': 'completed'})
+        path = '/api/impact/' + report['impact_report_id'] + '/reject'
+        body = {'reviewer': 'reviewer', 'patch_sha256': report['patch_sha256'], 'base_commit': self.base}
+        rejected = self.post(path, body)
+        self.assertEqual(rejected['review']['decision'], 'reject')
+        audit_file = self.artifacts / 'runs' / run['run_id'] / 'audit' / 'final.json'
+        self.assertTrue(audit_file.exists())
+        audit_data = json.loads(audit_file.read_text())
+        self.assertTrue(any(e['event_type'] == 'review_decision' for e in audit_data['events']))
+        self.assertEqual(audit_data['impacts'][0]['status']['review']['decision'], 'reject')
+        self.assertFalse(self.post(path, body)['created'])
+
+    def test_rejected_active_patch_exports_after_completion(self):
+        contract, run = self.run_contract()
+        safe = self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        report = preview(self.client, self.repo, run['run_id'], contract['contract_id'], contract['version'], safe)
+        rejected = self.post('/api/impact/' + report['impact_report_id'] + '/reject',
+                             {'reviewer': 'reviewer', 'patch_sha256': report['patch_sha256'], 'base_commit': self.base})
+        self.assertEqual(rejected['review']['decision'], 'reject')
+        audit_file = self.artifacts / 'runs' / run['run_id'] / 'audit' / 'final.json'
+        self.assertFalse(audit_file.exists())
+        self.client.request('/internal/runs/' + run['run_id'] + '/state', {'status': 'completed'})
+        for _ in range(40):
+            if audit_file.exists():
+                break
+            time.sleep(.1)
+        self.assertTrue(audit_file.exists())
+        self.assertEqual(json.loads(audit_file.read_text())['impacts'][0]['status']['review']['decision'], 'reject')
+
+    def test_audit_finalizer_rejects_missing_promoter_token(self):
+        request = urllib.request.Request(self.promoter_url + '/finalize-rejection',
+                                         data=json.dumps({'impact_report_id': 'impact_fake', 'run_id': 'run_fake'}).encode(),
+                                         method='POST', headers={'Content-Type': 'application/json'})
+        with self.assertRaises(urllib.error.HTTPError) as denied:
+            urllib.request.urlopen(request, timeout=3)
+        self.assertEqual(denied.exception.code, 403)
+        denied.exception.close()
+
+    def test_audit_finalizer_refuses_unreviewed_report(self):
+        contract, run = self.run_contract()
+        safe = self.patch('>= timeoutSeconds;', '>= timeoutSeconds * 1000;')
+        report = preview(self.client, self.repo, run['run_id'], contract['contract_id'], contract['version'], safe)
+        self.client.request('/internal/runs/' + run['run_id'] + '/state', {'status': 'completed'})
+        request = urllib.request.Request(self.promoter_url + '/finalize-rejection',
+                                         data=json.dumps({'impact_report_id': report['impact_report_id'], 'run_id': run['run_id']}).encode(),
+                                         method='POST', headers={'Content-Type': 'application/json',
+                                                                 'X-IntentLock-Promoter-Token': self.promoter_token})
+        with urllib.request.urlopen(request, timeout=3) as response:
+            self.assertEqual(json.load(response)['status'], 'refused')
+        self.assertFalse((self.artifacts / 'runs' / run['run_id'] / 'audit' / 'final.json').exists())
+
     def test_zz_dependency_only_patch_requires_review_before_promotion(self):
         source = self.repo/'src/auth/session.ts'
         if '>= timeoutSeconds;' in source.read_text():

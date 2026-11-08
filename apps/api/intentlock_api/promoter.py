@@ -84,3 +84,18 @@ class PromoterClient:
             return PromoterResponse.model_validate(body)
         except ValidationError as e:
             raise PromoterError("malformed promoter response") from e
+
+    def finalize_rejection(self, impact_report_id: str, run_id: str) -> None:
+        """Ask the artifact-owning service to finalize a rejected run's audit."""
+        data = json.dumps({"impact_report_id": impact_report_id, "run_id": run_id}).encode()
+        r = urllib.request.Request(self._url.removesuffix("/promote") + "/finalize-rejection",
+                                   data=data, method="POST", headers={
+                                       "content-type": "application/json",
+                                       "X-IntentLock-Promoter-Token": self._token})
+        try:
+            with self._opener.open(r, timeout=self._timeout) as resp:
+                body: Any = json.loads(resp.read(4096))
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+            raise PromoterError(type(e).__name__) from e
+        if not isinstance(body, dict) or body.get("status") not in ("finalized", "queued"):
+            raise PromoterError("audit finalization refused")

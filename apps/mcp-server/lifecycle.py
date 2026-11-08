@@ -91,6 +91,10 @@ def supervise(command, cwd, client, run_id, contract_id, version, poll_seconds=0
             report_status = 'failed'
             result_code = 2
             outcome = 'Agent process-group cleanup was denied'
+        try:
+            client.event(run_id, outcome)
+        except ControlPlaneError:
+            pass
         if report_status is not None:
             try:
                 response = client.finish(run_id, report_status, outcome)
@@ -98,10 +102,6 @@ def supervise(command, cwd, client, run_id, contract_id, version, poll_seconds=0
                     result_code = 2
             except ControlPlaneError:
                 result_code = 2
-        try:
-            client.event(run_id, outcome)
-        except ControlPlaneError:
-            pass
         if os.environ.get('INTENTLOCK_ARTIFACT_BUCKET') or os.environ.get('INTENTLOCK_ARTIFACT_DIR'):
             try:
                 import importlib.util

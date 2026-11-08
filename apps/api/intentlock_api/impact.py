@@ -230,6 +230,11 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
         existing = store.get_final_review(impact_id)
         if existing is not None:
             if existing.decision == decision and existing.reviewer == body.reviewer:
+                if decision == "reject" and promoter is not None and hasattr(promoter, "finalize_rejection"):
+                    try:
+                        promoter.finalize_rejection(report.impact_report_id, report.run_id)
+                    except PromoterError:
+                        return {"review": existing.model_dump(mode="json"), "created": False, "audit_status": "unavailable"}
                 return {"review": existing.model_dump(mode="json"), "created": False}
             raise HTTPException(409, "ALREADY_REVIEWED")
         if decision == "approve":
@@ -253,6 +258,12 @@ def register(app, store, artifacts, promoter, require_internal: Callable[[str | 
               {"review_id": stored.review_id, "decision": decision, "reviewer": body.reviewer,
                "patch_sha256": report.patch_sha256, "base_commit": report.base_commit,
                "contract_version": report.contract_version})
+        if decision == "reject" and promoter is not None and hasattr(promoter, "finalize_rejection"):
+            try:
+                promoter.finalize_rejection(report.impact_report_id, report.run_id)
+            except PromoterError:
+                # The review is already durable. A retry of the same rejection retries export.
+                return {"review": stored.model_dump(mode="json"), "created": True, "audit_status": "unavailable"}
         return {"review": stored.model_dump(mode="json"), "created": True}
 
     @app.post("/api/impact/{impact_id}/approve")

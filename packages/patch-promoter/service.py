@@ -122,12 +122,70 @@ class Verifier:
                 pass
             time.sleep(.25)
 
+    def finalize_after_rejection(self, run_id, impact_id, attempts=240):
+        """Export only after the API confirms the rejected review and terminal run."""
+        from importlib.util import module_from_spec, spec_from_file_location
+        source = Path(__file__).resolve().parents[1] / 'sandbox-provider' / 'export_audit.py'
+        spec = spec_from_file_location('intentlock_export_audit', source)
+        audit = module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        client = audit.Client(self.api_url, self.internal_token)
+        report = self.get('/api/impact/' + impact_id)
+        if report.get('run_id') != run_id:
+            raise Refused('IMPACT_MISMATCH')
+        state = self.get('/api/impact/' + impact_id + '/status')
+        if (state.get('review') or {}).get('decision') != 'reject':
+            raise Refused('NOT_REJECTED')
+        for _ in range(attempts):
+            run = client.run(run_id)
+            if run['status'] in ('completed', 'failed', 'blocked', 'stopped'):
+                try:
+                    audit.export(client, self.artifacts, run_id)
+                    return 'finalized'
+                except ValueError as exc:
+                    if str(exc) != 'RUN_REVIEW_PENDING':
+                        raise
+            time.sleep(.25)
+        return 'queued'
+
 
 def handler(verifier, token):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            if self.path != '/promote' or not hmac.compare_digest(self.headers.get('X-IntentLock-Promoter-Token', ''), token):
+            if self.path not in ('/promote', '/finalize-rejection') or not hmac.compare_digest(self.headers.get('X-IntentLock-Promoter-Token', ''), token):
                 self.send_error(403)
+                return
+            if self.path == '/finalize-rejection':
+                try:
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if size < 1 or size > 512:
+                        raise Refused('INVALID_REQUEST')
+                    request = json.loads(self.rfile.read(size))
+                    if not isinstance(request, dict) or set(request) != {'impact_report_id', 'run_id'} or not all(
+                        isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,100}', value)
+                        for value in request.values()
+                    ):
+                        raise Refused('INVALID_REQUEST')
+                    # Do not hold the API request for a still-running agent.
+                    run = verifier.get('/api/runs/' + request['run_id'])
+                    if run.get('status') in ('completed', 'failed', 'blocked', 'stopped'):
+                        status = verifier.finalize_after_rejection(request['run_id'], request['impact_report_id'], attempts=1)
+                        if status == 'queued':
+                            threading.Thread(target=verifier.finalize_after_rejection,
+                                             args=(request['run_id'], request['impact_report_id']), daemon=True).start()
+                    else:
+                        threading.Thread(target=verifier.finalize_after_rejection,
+                                         args=(request['run_id'], request['impact_report_id']), daemon=True).start()
+                        status = 'queued'
+                    reply = {'status': status}
+                except Exception:
+                    reply = {'status': 'refused', 'reason_code': 'AUDIT_FINALIZATION_UNAVAILABLE'}
+                data = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
                 return
             try:
                 size = int(self.headers.get('Content-Length', '0'))

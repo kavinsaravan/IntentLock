@@ -146,6 +146,8 @@ class Integration(unittest.TestCase):
                 self.assertEqual(self.client.run(run['run_id'])['status'], expected)
                 events = self.client.request('/api/runs/'+run['run_id']+'/events')['events']
                 self.assertEqual(sum(e['event_type'] == 'run_completed' for e in events), 1)
+            self.assertLess(max(e['seq'] for e in events if e['event_type'] == 'agent_event'),
+                            max(e['seq'] for e in events if e['event_type'] == 'run_completed'))
 
     def test_supervisor_auto_exports_final_audit(self):
         run = self.new_run()
@@ -157,6 +159,7 @@ class Integration(unittest.TestCase):
             self.assertTrue(saved.exists())
             data = json.loads(saved.read_text())
             self.assertEqual(data['run']['status'], 'completed')
+            self.assertTrue(any(e['event_type'] == 'agent_event' for e in data['events']))
 
     def test_sigterm_handler_reports_failure_and_cleans_child(self):
         run = self.new_run()
