@@ -1,0 +1,144 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack",
+        "cloudformation:CreateChangeSet",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:GetTemplate",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": "arn:aws:cloudformation:us-east-1:247495661854:stack/intentlock-control-plane-dev/*"
+    },
+    {
+      "Sid": "DynamoTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:ListTagsOfResource"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:247495661854:table/intentlock-control-plane"
+    },
+    {
+      "Sid": "LambdaFunction",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:TagResource",
+        "lambda:UntagResource",
+        "lambda:ListTags",
+        "lambda:InvokeFunction",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:247495661854:function:intentlock-authorizer"
+    },
+    {
+      "Sid": "LogGroup",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:ListTagsForResource",
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents",
+        "logs:DescribeLogStreams"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-1:247495661854:log-group:/aws/lambda/intentlock-authorizer",
+        "arn:aws:logs:us-east-1:247495661854:log-group:/aws/lambda/intentlock-authorizer:*"
+      ]
+    },
+    {
+      "Sid": "IamRolesAndPoliciesCreatedByTheStack",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:CreatePolicy",
+        "iam:DeletePolicy",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:TagPolicy",
+        "iam:UntagPolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::247495661854:role/intentlock-control-plane-dev-*",
+        "arn:aws:iam::247495661854:policy/intentlock-control-plane-dev-*"
+      ]
+    },
+    {
+      "Sid": "PassOnlyTheStackRoleToLambda",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::247495661854:role/intentlock-control-plane-dev-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "LambdaZipBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketVersioning",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::intentlock-code-247495661854-us-east-1",
+        "arn:aws:s3:::intentlock-code-247495661854-us-east-1/*"
+      ]
+    },
+    {
+      "Sid": "BudgetOptional",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:CreateBudget",
+        "budgets:ModifyBudget",
+        "budgets:ViewBudget"
+      ],
+      "Resource": "arn:aws:budgets::247495661854:budget/intentlock-*"
+    }
+  ]
+}

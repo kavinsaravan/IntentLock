@@ -1,0 +1,22 @@
+{
+  "event_id": "evt_01",
+  "run_id": "run_01",
+  "seq": 2,
+  "request_id": "req_02",
+  "event_type": "tool_request",
+  "timestamp": "2026-11-07T10:01:00Z",
+  "status": "decided",
+  "tool": "read_file",
+  "arguments_redacted": {
+    "path": ".env"
+  },
+  "decision": "deny",
+  "reason_code": "PROTECTED_PATH",
+  "message": "The requested path is protected by the mission contract.",
+  "latency_ms": 0.5,
+  "evidence": {
+    "requested_path": ".env",
+    "matched_rule": ".env*"
+  },
+  "details": null
+}

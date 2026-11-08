@@ -1,0 +1,194 @@
+{
+  "$id": "https://intentlock.dev/schemas/0.1.0/event.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One timeline entry. A tool_request event is created `pending` before\nauthorization and updated to `decided` with the decision (PRD FR-4).",
+  "properties": {
+    "arguments_redacted": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Arguments Redacted"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision"
+    },
+    "details": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Details"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "enum": [
+        "run_started",
+        "tool_request",
+        "run_stopped",
+        "agent_event",
+        "impact_report",
+        "review_decision",
+        "promotion",
+        "run_completed"
+      ],
+      "title": "Event Type",
+      "type": "string"
+    },
+    "evidence": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence"
+    },
+    "latency_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Latency Ms"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Message"
+    },
+    "reason_code": {
+      "anyOf": [
+        {
+          "enum": [
+            "ALLOW",
+            "CONTRACT_NOT_FOUND",
+            "CONTRACT_VERSION_MISMATCH",
+            "CONTRACT_NOT_ACTIVE",
+            "RUN_NOT_ACTIVE",
+            "TOOL_NOT_ALLOWED",
+            "INVALID_ARGUMENTS",
+            "PATH_NOT_ALLOWED",
+            "PROTECTED_PATH",
+            "TEST_NOT_APPROVED",
+            "NETWORK_NOT_ALLOWED",
+            "TOOL_CALL_LIMIT_EXCEEDED",
+            "POLICY_ENGINE_ERROR",
+            "IMPACT_BLOCKED",
+            "STALE_BASE_COMMIT",
+            "PATCH_HASH_MISMATCH"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason Code"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "seq": {
+      "minimum": 1,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "decided",
+        "recorded"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "tool": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool"
+    }
+  },
+  "required": [
+    "event_id",
+    "run_id",
+    "seq",
+    "event_type",
+    "timestamp",
+    "status"
+  ],
+  "title": "Event",
+  "type": "object",
+  "x-schema-version": "0.1.0"
+}
