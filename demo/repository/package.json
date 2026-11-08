@@ -1,1 +1,1 @@
-{"private":true,"type":"module","scripts":{"test:auth":"node --experimental-strip-types --test tests/auth/*.test.ts"}}
+{"private":true,"type":"module","scripts":{"test:auth":"node --experimental-strip-types --test tests/auth/*.test.ts","test:payments":"node --experimental-strip-types --test tests/payments/*.test.ts"}}

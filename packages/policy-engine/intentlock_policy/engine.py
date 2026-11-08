@@ -45,6 +45,7 @@ TRUSTED_SCRIPT_NAMES = frozenset({
     "pretest", "test", "posttest", "jest", "mocha", "vitest", "ava", "nyc", "c8",
 })
 _PKG_RUNNERS = {"npm", "pnpm", "yarn"}
+_COMMAND_ID_RX = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _KEY_RX = re.compile(r'"([^"]+)"\s*:')
 _FILE_OPS = ("deleted file mode", "new file mode", "rename from", "rename to", "copy from", "copy to")
 
@@ -208,6 +209,15 @@ def _validate_arguments(tool: str, args: dict[str, Any],
         tid = _require_str(args, "test_id", 64)
         if tid not in contract.approved_tests:
             raise _Deny("TEST_NOT_APPROVED", {"test_id": tid[:64]})
+        return [], []
+    if tool == "run_approved_command":
+        # The agent names a catalogue id; it can never supply argv, a shell string, or extra keys.
+        _require_keys(args, {"command_id"})
+        cid = _require_str(args, "command_id", 64)
+        if not _COMMAND_ID_RX.fullmatch(cid):
+            raise _Deny("INVALID_ARGUMENTS", {"field": "command_id"})
+        if cid not in contract.approved_tests:
+            raise _Deny("TEST_NOT_APPROVED", {"command_id": cid})
         return [], []
     if tool == "request_permission":
         _require_keys(args, {"tool", "resource", "reason"})

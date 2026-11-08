@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "./components/ui";
 import { api } from "./lib/api";
+import { setLastRunId } from "./lib/lastRun";
 import type { Health } from "./lib/types";
 import { ActiveRun } from "./screens/ActiveRun";
 import { ApprovedContract } from "./screens/ApprovedContract";
@@ -39,6 +40,8 @@ export default function App() {
   const hash = useHash();
   const [draft, setDraft] = useState<DraftState | null>(null);
   const m = /^#\/runs\/([^/]+)(?:\/(contract|impact|audit))?$/.exec(hash);
+  // Remember the run being viewed so the Mission and Contract screens can still link back to it.
+  if (m) setLastRunId(decodeURIComponent(m[1]));
   let screen;
   if (m) {
     const id = decodeURIComponent(m[1]);

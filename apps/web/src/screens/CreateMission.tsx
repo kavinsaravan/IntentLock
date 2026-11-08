@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Card, Notice, Spinner, Stepper } from "../components/ui";
 import { api, ApiError } from "../lib/api";
+import { getLastRunId } from "../lib/lastRun";
 import type { ContractDraft } from "../lib/types";
 import fixtureDraft from "../../../../packages/contracts/fixtures/contract-draft.json";
 
 export interface DraftState { draft: ContractDraft; source: "bedrock" | "fixture"; attempts?: number }
 const COMMIT_RX = /^[0-9a-f]{40}$/;
-const DEFAULT_TASK = "Fix the authentication timeout bug. Read and edit src/auth/**; run the approved authentication test. Do not access secrets, CI configuration, infrastructure, or the network.";
+const DEFAULT_TASK = "Read src/auth/session.ts, then propose a patch fixing the timeout's seconds-to-milliseconds conversion. TwinGuard runs auth-tests on the patch; finish after its impact report. Do not inspect or edit tests, secrets, or the network.";
 
 export function CreateMission({ onDraft }: { onDraft: (d: DraftState) => void }) {
   const [task, setTask] = useState(DEFAULT_TASK);
@@ -28,14 +29,14 @@ export function CreateMission({ onDraft }: { onDraft: (d: DraftState) => void })
 
   // PRD §23 fallback: prevalidated fixture. Clearly labelled; still requires human approval + validation.
   function useFixture() {
-    const d = { ...(fixtureDraft as unknown as ContractDraft), mission: task.slice(0, 200) || (fixtureDraft as { mission: string }).mission, base_commit: commit };
+    const d = { ...(fixtureDraft as unknown as ContractDraft), mission: task.slice(0, 2000) || (fixtureDraft as { mission: string }).mission, base_commit: commit };
     onDraft({ draft: d, source: "fixture" });
     location.hash = "#/review";
   }
 
   return (
     <>
-      <Stepper active={0} />
+      <Stepper active={0} runId={getLastRunId()} />
       <Card title="Create mission">
         <label className="field">
           <span>Task for the coding agent</span>
