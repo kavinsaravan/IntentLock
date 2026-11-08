@@ -1,0 +1,37 @@
+{
+  "impact_report_id": "impact_01",
+  "run_id": "run_01",
+  "sandbox_id": "sandbox_01",
+  "contract_id": "contract_01",
+  "contract_version": 1,
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "patch_s3_key": "runs/run_01/patches/a3f1c2d4e5b6978877665544332211009f8e7d6c5b4a39281706f5e4d3c2b1a0.patch",
+  "patch_sha256": "a3f1c2d4e5b6978877665544332211009f8e7d6c5b4a39281706f5e4d3c2b1a0",
+  "summary": {
+    "files_created": 0,
+    "files_modified": 3,
+    "files_deleted": 0,
+    "files_renamed": 0,
+    "lines_added": 28,
+    "lines_deleted": 11
+  },
+  "tests": [
+    {
+      "test_id": "auth-tests",
+      "status": "failed",
+      "exit_code": 1,
+      "duration_ms": 1840,
+      "output_s3_key": "runs/run_01/tests/auth-tests.txt"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "code": "CRITICAL_TEST_FAILURE",
+      "message": "Authentication regression tests failed.",
+      "evidence": "tests/auth/token.test.ts"
+    }
+  ],
+  "decision": "block",
+  "created_at": "2026-11-07T10:05:00Z"
+}

@@ -1,0 +1,11 @@
+{
+  "request_id": "req_x",
+  "contract_id": "contract_01",
+  "contract_version": 1,
+  "tool": "read_file",
+  "arguments": {
+    "path": "a"
+  },
+  "agent_id": "coding-agent-01",
+  "timestamp": "2026-11-07T10:01:00Z"
+}

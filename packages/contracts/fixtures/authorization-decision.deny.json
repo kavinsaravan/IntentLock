@@ -1,0 +1,12 @@
+{
+  "request_id": "req_02",
+  "decision": "deny",
+  "reason_code": "PROTECTED_PATH",
+  "message": "The requested path is protected by the mission contract.",
+  "evidence": {
+    "requested_path": ".env",
+    "matched_rule": ".env*"
+  },
+  "stop_run": true,
+  "latency_ms": 0.5
+}

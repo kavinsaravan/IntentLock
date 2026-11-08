@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyVerificationLists",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ListTables",
+        "dynamodb:DescribeLimits",
+        "lambda:GetAccountSettings",
+        "lambda:ListFunctions",
+        "cloudformation:ListStacks",
+        "cloudformation:ValidateTemplate",
+        "cloudformation:GetTemplateSummary",
+        "s3:ListAllMyBuckets",
+        "logs:DescribeLogGroups",
+        "cloudwatch:ListMetrics",
+        "cloudwatch:GetMetricData",
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel",
+        "bedrock:GetFoundationModelAvailability",
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile",
+        "budgets:ViewBudget"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadOwnedResourcesForConflictChecks",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeContinuousBackups",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:247495661854:table/intentlock-*",
+        "arn:aws:lambda:us-east-1:247495661854:function:intentlock-*",
+        "arn:aws:cloudformation:us-east-1:247495661854:stack/intentlock-*/*"
+      ]
+    },
+    {
+      "Sid": "SimulateOwnPermissions",
+      "Effect": "Allow",
+      "Action": [
+        "iam:SimulatePrincipalPolicy",
+        "iam:GetUser"
+      ],
+      "Resource": "arn:aws:iam::247495661854:user/aparpia"
+    }
+  ]
+}

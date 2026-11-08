@@ -1,0 +1,45 @@
+{
+  "mission": "Fix authentication timeout bug",
+  "repository_id": "intentlock-demo",
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "allowed_tools": [
+    "list_files",
+    "read_file",
+    "search_code",
+    "propose_patch",
+    "run_approved_test"
+  ],
+  "allowed_paths": [
+    "src/auth/**",
+    "tests/auth/**",
+    "package.json"
+  ],
+  "protected_paths": [
+    ".env*",
+    ".git/**",
+    ".github/**",
+    "infra/**"
+  ],
+  "approved_tests": {
+    "auth-tests": {
+      "argv": [
+        "npm",
+        "run",
+        "test:auth"
+      ],
+      "timeout_seconds": 60
+    }
+  },
+  "network_access": false,
+  "limits": {
+    "max_files_changed": 8,
+    "max_files_deleted": 0,
+    "max_lines_added": 300,
+    "max_lines_deleted": 150,
+    "max_tool_calls": 50,
+    "run_timeout_seconds": 600
+  },
+  "required_exports": [
+    "verifyToken"
+  ]
+}
