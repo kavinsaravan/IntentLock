@@ -394,3 +394,9 @@ Two failures reported by Kavin after combining both branches into `integration/m
 1. **Person 2 / Kavin (critical for demo):** run the full E2E demo on their machine with Docker + Kiro to verify Scenarios A/B/C through the real sandbox and promoter; call `/internal/runs/{id}/state`; implement `TRUSTED_TEST_MODIFIED`; fix the `killpg`/SIGTERM issues.
 2. **Owner/Kavin decisions:** (a) confirm the budget recipients so ONE $25 alert can be created; (b) Bedrock model + approval for a first billable invocation; (c) optional code-only redeploy of the Lambda.
 3. **Before the demo:** run `measure_authorize_latency.py` on the demo machine/network; start the API with `apps/api/run_demo_api.sh`; give Person 2 the same `INTENTLOCK_INTERNAL_TOKEN` and `INTENTLOCK_API_URL=http://127.0.0.1:8787`.
+
+### Milestone 10 — final demo integration merged to main (2026-11-07)
+- `integration/final-demo@5784aad` (main + `kavinperson2branch@a1c25f3`) merged into `main` at `09bd239`; no AWS changes.
+- Adds all 7 PRD MCP tools, automatic audit export, dependency-only review (`review_required`), Bedrock frozen-catalog validation, Lambda EMF metrics.
+- Verified from `main` with project venv: policy+contract 113 passed; API 294 passed, 1 skipped; sandbox 23 passed, 9 skipped, 8 Docker-only failures (no Docker on this machine); web vitest 9 passed, `npm run build` OK.
+- Remaining before recording: Docker + Kiro CLI verification on Kavin's machine.
