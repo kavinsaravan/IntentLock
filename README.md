@@ -1,5 +1,4 @@
 # IntentLock
-# IntentLock
 
 IntentLock lets a security, platform, or DevOps team give a coding agent a narrow mission without giving it unrestricted access to the repository. A human approves a mission contract; a deterministic policy checks every controlled tool request. TwinGuard previews proposed edits in a networkless Docker sandbox, runs fixed authentication tests, and promotes only the exact patch a human reviewed.
 
