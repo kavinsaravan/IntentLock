@@ -7,7 +7,7 @@ import re
 
 MAX_OBJECT_BYTES = 2_000_000
 MAX_ARCHIVE_BYTES = 100_000_000
-KEY = re.compile(r"runs/[A-Za-z0-9_-]{1,100}/(?:patches/[0-9a-f]{64}\.patch|tests/[A-Za-z0-9_-]{1,100}\.txt|impact/[A-Za-z0-9_-]{1,100}\.json|audit/final\.json|input/repository\.tar\.gz)\Z")
+KEY = re.compile(r"runs/[A-Za-z0-9_-]{1,100}/(?:patches/[0-9a-f]{64}\.patch|tests/[A-Za-z0-9_-]{1,100}\.txt|impact/[A-Za-z0-9_-]{1,100}\.json|agent/(?:permissions|summaries)/[A-Za-z0-9_-]{1,100}\.json|audit/final\.json|input/repository\.tar\.gz)\Z")
 
 
 class ArtifactError(Exception):

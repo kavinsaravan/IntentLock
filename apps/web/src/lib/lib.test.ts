@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countDecisions, findImpactReportId, latencyStats, mergeEvents } from "./events";
+import { countDecisions, findImpactReportId, impactReportIds, latencyStats, mergeEvents } from "./events";
 import { parseUnifiedDiff } from "./diff";
 import { describeError } from "./api";
 import { elapsedSeconds, lines } from "./format";
@@ -37,6 +37,8 @@ describe("events", () => {
       ev(2, { event_type: "impact_report", details: { impact_report_id: "b" } }),
       ev(3, { event_type: "agent_event" })]);
     expect(id).toBe("b");
+    expect(impactReportIds([ev(1, { event_type: "impact_report", details: { impact_report_id: "a" } }),
+      ev(2, { event_type: "impact_report", details: { impact_report_id: "b" } })])).toEqual(["b", "a"]);
   });
 });
 

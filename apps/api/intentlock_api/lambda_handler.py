@@ -16,6 +16,7 @@ function (memory store without INTENTLOCK_ALLOW_MEMORY_STORE=1) denies everythin
 import json
 import logging
 import os
+import time
 from typing import Any
 
 from .service import authorize_request, error_decision
@@ -26,6 +27,24 @@ from .store import StoreError, create_store_from_env
 logging.getLogger("intentlock").setLevel(logging.INFO)
 log = logging.getLogger("intentlock.lambda")
 _store = None
+
+
+def _emit_metrics(decision) -> None:
+    """CloudWatch EMF through Lambda stdout, with fixed low-cardinality dimensions."""
+    if not os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+        return
+    allowed = decision.decision == 'allow'
+    record = {
+        '_aws': {'Timestamp': int(time.time() * 1000), 'CloudWatchMetrics': [{
+            'Namespace': 'IntentLock', 'Dimensions': [['Component']],
+            'Metrics': [{'Name': 'AuthorizationLatencyMs', 'Unit': 'Milliseconds'},
+                        {'Name': 'ToolRequestsAllowed', 'Unit': 'Count'},
+                        {'Name': 'ToolRequestsDenied', 'Unit': 'Count'}]}]},
+        'Component': 'Authorizer', 'AuthorizationLatencyMs': decision.latency_ms,
+        'ToolRequestsAllowed': 1 if allowed else 0,
+        'ToolRequestsDenied': 0 if allowed else 1,
+    }
+    print(json.dumps(record, separators=(',', ':')), flush=True)
 
 
 def get_store():
@@ -60,6 +79,7 @@ def handler(event: Any, context: Any = None) -> Any:
         log.error("authorization failed closed: %s", type(e).__name__)
         decision = error_decision(rid)
     out = decision.model_dump(mode="json")
+    _emit_metrics(decision)
     if proxy:
         return {"statusCode": 200, "headers": {"content-type": "application/json"}, "body": json.dumps(out)}
     return out

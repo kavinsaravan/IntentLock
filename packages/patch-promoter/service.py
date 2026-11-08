@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+import threading
+import time
 import urllib.request
 
 
@@ -61,7 +63,7 @@ class Verifier:
         for field in ('impact_report_id', 'run_id', 'contract_id', 'contract_version', 'base_commit', 'patch_sha256', 'patch_s3_key'):
             if report.get(field) != request[field]:
                 raise Refused('IMPACT_MISMATCH')
-        if report.get('decision') != 'pass' or any(x.get('severity') == 'critical' for x in report.get('findings', [])):
+        if report.get('decision') not in ('pass', 'review_required') or any(x.get('severity') in ('critical', 'high') for x in report.get('findings', [])):
             raise Refused('IMPACT_BLOCKED')
         status = self.get('/api/impact/' + report_id + '/status')
         review = status.get('review')
@@ -101,6 +103,25 @@ class Verifier:
             return self.get('/api/runs/' + request['run_id']).get('status')
         return core.promote(self.repository, artifact, request['base_commit'], request['patch_sha256'], state)
 
+    def finalize_after_promotion(self, run_id, impact_id):
+        """Wait until the API records the promotion, then export one complete audit."""
+        from importlib.util import module_from_spec, spec_from_file_location
+        source = Path(__file__).resolve().parents[1] / 'sandbox-provider' / 'export_audit.py'
+        spec = spec_from_file_location('intentlock_export_audit', source)
+        audit = module_from_spec(spec)
+        spec.loader.exec_module(audit)
+        client = audit.Client(self.api_url, self.internal_token)
+        for _ in range(240):
+            try:
+                state = self.get('/api/impact/' + impact_id + '/status')
+                run = client.run(run_id)
+                if (state.get('promotion') or {}).get('status') == 'promoted' and run['status'] in ('completed', 'failed', 'blocked', 'stopped'):
+                    audit.export(client, self.artifacts, run_id)
+                    return
+            except Exception:
+                pass
+            time.sleep(.25)
+
 
 def handler(verifier, token):
     class Handler(BaseHTTPRequestHandler):
@@ -125,6 +146,9 @@ def handler(verifier, token):
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+            if reply['status'] == 'promoted':
+                threading.Thread(target=verifier.finalize_after_promotion,
+                                 args=(request['run_id'], request['impact_report_id']), daemon=True).start()
     return Handler
 
 
