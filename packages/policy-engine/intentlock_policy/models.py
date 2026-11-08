@@ -18,6 +18,7 @@ ToolName = Literal[
     "search_code",
     "propose_patch",
     "run_approved_test",
+    "run_approved_command",
     "request_permission",
     "finish_task",
 ]
@@ -206,6 +207,16 @@ class ImpactTest(_Strict):
     exit_code: int | None = None
     duration_ms: int = Field(ge=0)
     output_s3_key: str | None = None
+    # Additive (0.1.0-compatible): why TwinGuard selected this catalogue check for this patch.
+    reason: str | None = None
+
+
+class ImpactCoverage(_Strict):
+    """Additive: which trusted checks were selected from the changed paths, and what no test covers."""
+
+    selected_checks: list[str]
+    uncovered_paths: list[str]
+    not_approved_checks: list[str] = Field(default_factory=list)
 
 
 class ImpactFinding(_Strict):
@@ -238,6 +249,7 @@ class ImpactReport(_Strict):
     findings: list[ImpactFinding]
     # "pass" = may proceed to human review; it never means auto-apply.
     decision: Literal["block", "review_required", "pass"]
+    coverage: ImpactCoverage | None = None
     created_at: AwareDatetime
 
 

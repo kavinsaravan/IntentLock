@@ -1,5 +1,38 @@
 {
   "$defs": {
+    "ImpactCoverage": {
+      "additionalProperties": false,
+      "description": "Additive: which trusted checks were selected from the changed paths, and what no test covers.",
+      "properties": {
+        "not_approved_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Approved Checks",
+          "type": "array"
+        },
+        "selected_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selected Checks",
+          "type": "array"
+        },
+        "uncovered_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncovered Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "selected_checks",
+        "uncovered_paths"
+      ],
+      "title": "ImpactCoverage",
+      "type": "object"
+    },
     "ImpactFinding": {
       "additionalProperties": false,
       "properties": {
@@ -120,6 +153,18 @@
           "default": null,
           "title": "Output S3 Key"
         },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
         "status": {
           "enum": [
             "passed",
@@ -161,6 +206,17 @@
       "minimum": 1,
       "title": "Contract Version",
       "type": "integer"
+    },
+    "coverage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImpactCoverage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "created_at": {
       "format": "date-time",

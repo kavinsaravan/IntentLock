@@ -122,12 +122,7 @@ export function ImpactReview({ runId }: { runId: string }) {
           </div>
         </Card>
         <div className="grid2">
-          <Card title="Approved tests">
-            {r.tests.length === 0 ? <p className="muted">No tests recorded.</p> : (
-              <table className="tbl"><thead><tr><th>Test</th><th>Result</th><th>Exit</th><th>Time</th></tr></thead><tbody>
-                {r.tests.map((t) => <tr key={t.test_id}><td><code>{t.test_id}</code></td><td><Badge tone={t.status === "passed" ? "ok" : "deny"}>{t.status}</Badge></td><td>{t.exit_code ?? "—"}</td><td>{t.duration_ms} ms</td></tr>)}
-              </tbody></table>)}
-          </Card>
+          <ChecksCard r={r} />
           <Card title="Deterministic findings">
             {r.findings.length === 0 ? <p className="muted">No findings.</p> : (
               <ul className="findings">{r.findings.map((f, i) => <li key={i}><Badge tone={sevTone(f.severity)}>{f.severity}</Badge> <code>{f.code}</code><div>{f.message}</div>{f.evidence && <small className="muted">{f.evidence}</small>}</li>)}</ul>)}
@@ -160,5 +155,22 @@ export function ImpactReview({ runId }: { runId: string }) {
         </Card>
       </>)}
     </>
+  );
+}
+
+/** Checks TwinGuard selected from the changed paths, why, and what no test covers. */
+export function ChecksCard({ r }: { r: Pick<ImpactReport, "tests" | "coverage"> }) {
+  const uncovered = r.coverage?.uncovered_paths ?? [];
+  return (
+    <Card title="Selected checks">
+      {r.tests.length === 0 ? <p className="muted">No checks were run.</p> : (
+        <table className="tbl"><thead><tr><th>Check</th><th>Why selected</th><th>Result</th><th>Exit</th><th>Time</th></tr></thead><tbody>
+          {r.tests.map((t) => <tr key={t.test_id}><td><code>{t.test_id}</code></td><td>{t.reason ? <small className="muted">{t.reason}</small> : "—"}</td><td><Badge tone={t.status === "passed" ? "ok" : "deny"}>{t.status}</Badge></td><td>{t.exit_code ?? "—"}</td><td>{t.duration_ms} ms</td></tr>)}
+        </tbody></table>)}
+      {uncovered.length > 0 && (
+        <Notice tone="error" title="Missing test coverage">
+          No approved test covers: {uncovered.map((p) => <code key={p}> {p}</code>)}. Passing checks do not prove these paths are safe.
+        </Notice>)}
+    </Card>
   );
 }

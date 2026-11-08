@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "checks": {
+    "auth-tests": {
+      "kind": "test",
+      "argv": ["npm", "run", "test:auth"],
+      "paths": ["src/auth/**", "package.json"],
+      "timeout_seconds": 60
+    },
+    "payments-tests": {
+      "kind": "test",
+      "argv": ["npm", "run", "test:payments"],
+      "paths": ["src/payments/**", "package.json"],
+      "timeout_seconds": 60
+    },
+    "typecheck": {
+      "kind": "static",
+      "always": true,
+      "argv": ["tsc", "--noEmit", "-p", "tsconfig.json"],
+      "paths": ["src/**"],
+      "timeout_seconds": 60
+    }
+  },
+  "sensitive_paths": ["src/auth/**", "src/payments/**"],
+  "exempt_paths": ["**/*.md", "docs/**"]
+}

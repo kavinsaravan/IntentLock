@@ -6,9 +6,9 @@ This frozen prototype handles TypeScript/Node patches only. Build the sandbox im
 docker build -t intentlock-twinguard:local packages/sandbox-provider
 ```
 
-`local.py` archives a clean Git base commit, mounts the snapshot and proposed patch read only, and runs the fixed `npm run test:auth` command in a no-network Docker container with a read-only root, dropped capabilities, resource limits, and a disposable writable work directory. It returns a canonical diff and test evidence; it never writes to the original repository. The impact analyzer blocks failing tests, modified trusted tests/config, protected or out-of-contract paths, and exceeded patch limits.
+`local.py` archives a clean Git base commit, mounts the snapshot and proposed patch read only, and runs the commands chosen from the trusted check catalogue (`packages/impact-analyzer/catalogue.json`; the original contract-approved `npm run test:auth` is one entry) in a no-network Docker container with a read-only root, dropped capabilities, resource limits, and a disposable writable work directory. It returns a canonical diff and test evidence; it never writes to the original repository. The impact analyzer blocks failing tests, modified trusted tests/config, protected or out-of-contract paths, and exceeded patch limits.
 
-A `package.json` edit that changes only dependency fields runs the same fixed trusted test and returns `review_required` with a `DEPENDENCY_CHANGE` finding. Changes to scripts or other package fields still produce `TRUSTED_TEST_MODIFIED` and never execute the changed script. The promoter accepts `review_required` only after the normal authenticated review and exact-patch checks.
+A `package.json` edit that changes only dependency fields runs the same trusted checks and returns `review_required` with a `DEPENDENCY_CHANGE` finding. Changes to scripts or other package fields still produce `TRUSTED_TEST_MODIFIED` and never execute the changed script. The promoter accepts `review_required` only after the normal authenticated review and exact-patch checks.
 
 For the demo, create a separate Git repository from `demo/repository` and commit its baseline. Do not run against the IntentLock source repository:
 
@@ -44,3 +44,7 @@ INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/Ali-Person-1 \
 ```
 
 The actual Docker isolation probe runs with the same flags as patch execution and checks that only loopback is present, outbound TCP is unreachable, and the container root filesystem refuses writes. The full opt-in `test_real_kiro_proposes_reviewed_patch` uses authenticated Kiro to read a file, propose a patch through MCP, execute trusted tests in Docker, submit an impact report, approve it through the local API, and promote the exact patch. It can use local artifacts or live S3. Set `INTENTLOCK_REAL_KIRO=1` and optionally `INTENTLOCK_KIRO_GENERATE_PATCH=1`; the latter asks Kiro to write the diff itself. A browser-driven dashboard recording remains to be made.
+
+## Check catalogue and selection
+
+`catalogue.json` is administrator-owned and loaded by host-side code only (override the path with `INTENTLOCK_CHECK_CATALOGUE`); it is never in the agent workspace. Each check has an ID, `kind` (`test` or `static`), argv, path globs it covers, and a timeout. `execute(..., checks=[...])` writes the selected checks to a read-only `/patch/checks.txt` and `runner.sh` runs exactly those under `timeout`, writing per-check output, exit code and duration. `run_check()` runs one check on the clean base snapshot for `run_approved_command`. The image pins `typescript@5.6.3` at build time (`docker build -t intentlock-twinguard:local packages/sandbox-provider`), so type-checking needs no network at run time.

@@ -149,10 +149,12 @@ TOOLS = [{'name': 'list_files', 'description': 'List authorized direct children 
           'inputSchema': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path'], 'additionalProperties': False}},
          {'name': 'search_code', 'description': 'Search authorized paths for a literal query, returning at most 100 matches.',
           'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string'}, 'paths': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['query','paths'], 'additionalProperties': False}},
-         {'name':'propose_patch','description':'Preview an authorized unified Git patch in TwinGuard without modifying the protected repository.',
+         {'name':'propose_patch','description':'Preview an authorized unified Git patch in TwinGuard without modifying the protected repository. The returned impact decision includes checks run against the patched snapshot; after a passing report, finish the task for human review.',
           'inputSchema':{'type':'object','properties':{'patch':{'type':'string'}},'required':['patch'],'additionalProperties':False}},
-         {'name':'run_approved_test','description':'Run the fixed approved auth test in the isolated Docker sandbox.',
+         {'name':'run_approved_test','description':'Run an approved test (by test_id) on the original clean base in the isolated Docker sandbox. This does not test a proposed patch; use the propose_patch impact report for that.',
           'inputSchema':{'type':'object','properties':{'test_id':{'type':'string'}},'required':['test_id'],'additionalProperties':False}},
+         {'name':'run_approved_command','description':'Run an approved check (test or static analysis) by catalogue command_id on the original clean base in the isolated, network-less Docker sandbox. You supply only the ID; the command line is fixed by the administrator catalogue. This does not test a proposed patch.',
+          'inputSchema':{'type':'object','properties':{'command_id':{'type':'string'}},'required':['command_id'],'additionalProperties':False}},
          {'name':'request_permission','description':'Record a permission request for the human reviewer; it does not grant access.',
           'inputSchema':{'type':'object','properties':{'tool':{'type':'string'},'resource':{'type':'string'},'reason':{'type':'string'}},'required':['tool','resource','reason'],'additionalProperties':False}},
          {'name':'finish_task','description':'Record the agent task summary. The supervisor reports terminal run state.',
@@ -163,6 +165,35 @@ class Server:
         self.repository, self.authorize = repository, authorize
         self.run_id, self.contract_id, self.version = run_id, contract_id, version
 
+    def _tools_with_approved_ids(self):
+        """Advertise only contract-available tools and their approved check IDs.
+
+        This is discovery, not authorization: every call is still checked by the control plane.
+        On lookup failure, serve the plain descriptions; calls then fail closed at authorization.
+        """
+        try:
+            from twinguard import approved_check_ids
+            client = Client.from_env()
+            contract = _contract(client, self.contract_id, self.version)
+            ids = approved_check_ids(client, self.contract_id, self.version, contract=contract)
+            allowed = set(contract['allowed_tools']) | {'request_permission', 'finish_task'}
+        except Exception:
+            return TOOLS
+        tools = []
+        for tool in TOOLS:
+            if tool['name'] not in allowed:
+                continue
+            if tool['name'] == 'run_approved_test':
+                listed = ids['test']
+            elif tool['name'] == 'run_approved_command':
+                listed = ids['test'] + ids['static']
+            else:
+                tools.append(tool)
+                continue
+            note = f" Approved IDs for this run: {', '.join(listed)}." if listed else ' This run has no approved IDs; do not guess.'
+            tools.append({**tool, 'description': tool['description'] + note})
+        return tools
+
     def dispatch(self, message):
         method = message.get('method')
         if method == 'initialize':
@@ -170,18 +201,18 @@ class Server:
         if method == 'ping':
             return {}
         if method == 'tools/list':
-            return {'tools': TOOLS}
+            return {'tools': self._tools_with_approved_ids()}
         if method != 'tools/call':
             raise Denied('METHOD_NOT_FOUND')
         params = message.get('params', {})
         args = params.get('arguments', {})
         tool = params.get('name')
         keys = {'list_files': {'path'}, 'read_file': {'path'}, 'search_code': {'query','paths'},
-                'propose_patch': {'patch'}, 'run_approved_test': {'test_id'},
+                'propose_patch': {'patch'}, 'run_approved_test': {'test_id'}, 'run_approved_command': {'command_id'},
                 'request_permission': {'tool','resource','reason'}, 'finish_task': {'summary'}}
         if not isinstance(args, dict) or tool not in keys or set(args) != keys[tool]:
             raise Denied('INVALID_ARGUMENTS')
-        if tool in ('list_files', 'read_file', 'propose_patch', 'run_approved_test', 'finish_task') and not all(isinstance(v, str) for v in args.values()):
+        if tool in ('list_files', 'read_file', 'propose_patch', 'run_approved_test', 'run_approved_command', 'finish_task') and not all(isinstance(v, str) for v in args.values()):
             raise Denied('INVALID_ARGUMENTS')
         if tool == 'search_code' and (not isinstance(args['query'], str) or not args['query'] or len(args['query']) > 256
                                       or not isinstance(args['paths'], list) or not 1 <= len(args['paths']) <= 16
@@ -208,6 +239,10 @@ class Server:
             from twinguard import approved_test
             result = json.dumps(approved_test(Client.from_env(), self.repository.root, self.run_id,
                                               self.contract_id, self.version, args['test_id']))
+        elif tool == 'run_approved_command':
+            from twinguard import run_command
+            result = json.dumps(run_command(Client.from_env(), self.repository.root, self.run_id,
+                                            self.contract_id, self.version, args['command_id']))
         elif tool == 'request_permission':
             from twinguard import record_agent_note
             result = json.dumps(record_agent_note(Client.from_env(), self.run_id, 'permissions', args))

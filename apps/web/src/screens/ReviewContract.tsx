@@ -2,15 +2,16 @@ import { useState } from "react";
 import { Badge, Card, Notice, Stepper } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { lines } from "../lib/format";
+import { getLastRunId } from "../lib/lastRun";
 import type { ApprovedTest, ContractDraft, Contract } from "../lib/types";
 import type { DraftState } from "./CreateMission";
 
-const TOOLS = ["list_files", "read_file", "search_code", "propose_patch", "run_approved_test"];
+const TOOLS = ["list_files", "read_file", "search_code", "propose_patch", "run_approved_test", "run_approved_command"];
 type TestRow = { id: string; argv: string; timeout: number };
 const num = (v: string) => (v === "" ? 0 : Number(v));
 
 export function ReviewContract({ state }: { state: DraftState | null }) {
-  if (!state) return (<><Stepper active={1} /><Notice tone="info" title="No draft to review">Start from <a href="#/">Create mission</a>.</Notice></>);
+  if (!state) return (<><Stepper active={1} runId={getLastRunId()} /><Notice tone="info" title="No draft to review">Start from <a href="#/">Create mission</a>.</Notice></>);
   return <Form state={state} />;
 }
 
@@ -55,7 +56,7 @@ function Form({ state }: { state: DraftState }) {
 
   return (
     <>
-      <Stepper active={1} />
+      <Stepper active={1} runId={getLastRunId()} />
       <Notice tone="info" title={state.source === "bedrock" ? `Draft proposed by Amazon Bedrock (attempt ${state.attempts ?? 1})` : "Draft loaded from the committed fixture (Bedrock bypassed)"}>
         This is a proposal only. It becomes enforceable when you approve it; the backend re-validates everything and enforces it deterministically.
       </Notice>

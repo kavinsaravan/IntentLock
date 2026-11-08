@@ -24,7 +24,7 @@ export interface Limits {
   max_lines_added: number; max_lines_deleted: number;
   max_tool_calls: number; run_timeout_seconds: number;
 }
-export type ToolName = "list_files" | "read_file" | "search_code" | "propose_patch" | "run_approved_test";
+export type ToolName = "list_files" | "read_file" | "search_code" | "propose_patch" | "run_approved_test" | "run_approved_command";
 export interface ContractDraft {
   mission: string; repository_id: string; base_commit: string;
   allowed_tools: string[]; allowed_paths: string[]; protected_paths: string[];
@@ -58,7 +58,9 @@ export interface ImpactReport {
   summary: { files_created: number; files_modified: number; files_deleted: number;
              files_renamed: number; lines_added: number; lines_deleted: number };
   tests: { test_id: string; status: "passed" | "failed" | "timeout" | "error";
-           exit_code: number | null; duration_ms: number; output_s3_key: string | null }[];
+           exit_code: number | null; duration_ms: number; output_s3_key: string | null;
+           reason?: string | null }[];
+  coverage?: { selected_checks: string[]; uncovered_paths: string[]; not_approved_checks?: string[] } | null;
   findings: { severity: "critical" | "high" | "medium" | "low" | "info"; code: string;
               message: string; evidence: string | null }[];
   decision: "block" | "review_required" | "pass";

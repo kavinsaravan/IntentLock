@@ -2,6 +2,7 @@
 import hashlib
 import gzip
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -87,17 +88,33 @@ def snapshot(repo, base, target):
 
 def run_approved_test(repo, base, *, timeout=60):
     """Run the one frozen auth test in a fresh, networkless Docker snapshot."""
+    return _run_snapshot(repo, base, timeout, None)
+
+
+def run_check(repo, base, check, *, timeout=60):
+    """Run ONE trusted catalogue command ({id, argv, timeout_seconds}) on the clean base snapshot, offline.
+
+    No agent patch is applied. The caller must have taken `check` from the administrator catalogue; the
+    definition is re-validated before it is written for the in-container runner.
+    """
+    return _run_snapshot(repo, base, timeout, check)
+
+
+def _run_snapshot(repo, base, timeout, check):
     if clean_base(repo) != base:
         raise SandboxError('STALE_BASE_COMMIT')
     with tempfile.TemporaryDirectory(prefix='intentlock-test-') as tmp:
         root = Path(tmp)
-        inp, out = root / 'input', root / 'out'
-        inp.mkdir(); out.mkdir(); out.chmod(0o777)
+        inp, out, chk = root / 'input', root / 'out', root / 'check'
+        inp.mkdir(); out.mkdir(); chk.mkdir(); out.chmod(0o777)
         snapshot(repo, base, inp)
+        if check is not None:
+            (chk / 'checks.txt').write_text(_checks_file([check]))
         runner = Path(__file__).with_name('test_runner.sh').resolve()
         container = 'intentlock-test-' + uuid.uuid4().hex[:16]
         cmd = ['docker', 'run', '--rm', *isolation_flags(container),
                '--mount', f'type=bind,src={inp},dst=/input,readonly',
+               '--mount', f'type=bind,src={chk},dst=/check,readonly',
                '--mount', f'type=bind,src={out},dst=/out',
                '--mount', f'type=bind,src={runner},dst=/runner.sh,readonly', IMAGE, 'sh', '/runner.sh']
         started = time.monotonic()
@@ -113,9 +130,25 @@ def run_approved_test(repo, base, *, timeout=60):
                 'duration_ms': int((time.monotonic() - started) * 1000)}
 
 
-def execute(repo, base, patch, *, run_test=True, timeout=60):
+def _checks_file(checks):
+    lines = []
+    for c in checks:
+        # Defence in depth: the host catalogue validates these, but never write anything unexpected to the runner.
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', c['id']) or not isinstance(c['timeout_seconds'], int) \
+                or not 0 < c['timeout_seconds'] <= 600 or not c['argv'] \
+                or not all(re.fullmatch(r'[A-Za-z0-9_./:=@+-]{1,128}', a) for a in c['argv']):
+            raise SandboxError('invalid check definition')
+        lines.append(f"{c['id']} {c['timeout_seconds']} {' '.join(c['argv'])}")
+    return '\n'.join(lines) + '\n'
+
+
+def execute(repo, base, patch, *, run_test=True, timeout=60, checks=None):
+    """Apply `patch` in a snapshot. With `checks` (trusted catalogue entries), run exactly those commands
+    and return per-check results in `result['checks']`; without it, run the legacy fixed auth test."""
     if not isinstance(patch, bytes) or not patch or len(patch) > MAX_PATCH:
         raise SandboxError('invalid patch size')
+    if checks is not None and not checks:
+        run_test, checks = False, None
     if any(marker in patch for marker in (b'GIT binary patch', b'new file mode 120000', b'new file mode 100755', b'old mode 100644\nnew mode 100755')):
         raise SandboxError('unsupported patch type')
     if clean_base(repo) != base:
@@ -127,6 +160,7 @@ def execute(repo, base, patch, *, run_test=True, timeout=60):
         snapshot(repo, base, inp)
         (patch_dir / 'input.patch').write_bytes(patch)
         if run_test: (out / 'run-test').touch()
+        if checks: (patch_dir / 'checks.txt').write_text(_checks_file(checks))
         out.chmod(0o777)
         runner = Path(__file__).with_name('runner.sh').resolve()
         container = 'intentlock-tg-' + uuid.uuid4().hex[:16]
@@ -148,7 +182,17 @@ def execute(repo, base, patch, *, run_test=True, timeout=60):
             raise SandboxError('PATCH_DOES_NOT_APPLY')
         if p.returncode:
             raise SandboxError('SANDBOX_PATCH_FAILED')
-        return {'patch': (out/'result.patch').read_bytes(), 'numstat': (out/'numstat.txt').read_text(),
+        done = []
+        for c in checks or []:
+            exit_file = out / 'checks' / (c['id'] + '.exit')
+            if exit_file.exists():
+                code = int(exit_file.read_text())
+                done.append({'id': c['id'], 'exit': code,
+                             'status': 'passed' if code == 0 else 'timeout' if code in (124, 137, 143) else 'failed',
+                             'duration_ms': int((out / 'checks' / (c['id'] + '.ms')).read_text()),
+                             'output': (out / 'checks' / (c['id'] + '.txt')).read_bytes()[:65536]})
+        extra = {'checks': done} if checks is not None else {}
+        return {**extra, 'patch': (out/'result.patch').read_bytes(), 'numstat': (out/'numstat.txt').read_text(),
                 'names': (out/'names.txt').read_text(),
                 'package_before': (out/'package-before.json').read_bytes() if (out/'package-before.json').exists() else None,
                 'package_after': (out/'package-after.json').read_bytes() if (out/'package-after.json').exists() else None,

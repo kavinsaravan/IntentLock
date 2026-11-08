@@ -36,6 +36,8 @@ def redact_arguments(tool: str, args: Any) -> dict[str, Any]:
         return {"patch_sha256": hashlib.sha256(data).hexdigest(), "patch_bytes": len(data)}
     if tool == "run_approved_test":
         return {"test_id": scrub_text(str(args.get("test_id", "")), 64)}
+    if tool == "run_approved_command":
+        return {"command_id": scrub_text(str(args.get("command_id", "")), 64)}
     if tool == "request_permission":
         return {k: scrub_text(str(args.get(k, ""))) for k in ("tool", "resource", "reason")}
     if tool == "finish_task":
