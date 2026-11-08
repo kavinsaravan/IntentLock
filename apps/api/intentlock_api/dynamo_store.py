@@ -275,6 +275,16 @@ class DynamoStore:
                     time.sleep(random.uniform(0, 0.01 * (attempt + 1)))  # contention: retry
                     continue
                 raise self._wrap(e) from e
+            except RuntimeError as e:
+                # Moto's in-memory DynamoDB is not fully thread-safe: concurrent transact_write_items
+                # can trigger "dictionary changed size during iteration" inside moto internals.
+                # Real DynamoDB never raises RuntimeError. Retry as with TransactionConflictException.
+                if "dictionary changed size during iteration" not in str(e):
+                    raise
+                with self._hint_lock:
+                    self._seq_hint.pop(run_id, None)
+                time.sleep(random.uniform(0, 0.01 * (attempt + 1)))
+                continue
         raise StoreError("event append contention: gave up")
 
     def update_event(self, run_id: str, seq: int, base: Event | None = None, **fields: Any) -> Event:

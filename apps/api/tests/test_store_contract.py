@@ -32,10 +32,12 @@ def threads(n, fn):
     out, errs = [], []
     def w(i):
         try: out.append(fn(i))
-        except Exception as e: errs.append(e)
+        except Exception as e:
+            import traceback
+            errs.append(f"thread {i}: {type(e).__name__}: {e}\n{traceback.format_exc()}")
     ts = [threading.Thread(target=w, args=(i,)) for i in range(n)]
     [t.start() for t in ts]; [t.join() for t in ts]
-    assert not errs, errs
+    assert not errs, "\n".join(errs)
     return out
 
 
