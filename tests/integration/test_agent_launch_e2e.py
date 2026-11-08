@@ -142,11 +142,18 @@ def test_launch_api_starts_real_runner_and_scenario_a_is_enforced(stack):
     assert run_after["status"] == "blocked" and run_after["agent_process_id"]          # Person 2's supervisor registered the PID
     assert "demo-valid-token" not in json.dumps(evs)                                   # no file contents in events
     assert any(e["event_type"] == "agent_event" and e["details"] and "launcher_pid" in e["details"] for e in evs)
-    # UI/SSE accuracy: the SSE stream carries exactly the events the list endpoint returns
+    # UI/SSE accuracy: SSE and the list endpoint expose the same events over the same range.
+    # Take a fresh snapshot as the stable boundary (the run is terminal and the runner has exited,
+    # so no new events should arrive), then open SSE from seq 0 and compare the bounded range.
+    list_evs = api(stack, "GET", f"/api/runs/{run['run_id']}/events").json()["events"]
+    max_seq = list_evs[-1]["seq"] if list_evs else 0
     with httpx.stream("GET", f"{stack['url']}/api/runs/{run['run_id']}/events/stream?timeout_seconds=0.6", timeout=10) as s:
         body = "".join(s.iter_text())
     sse = [json.loads(l[6:]) for l in body.splitlines() if l.startswith("data: ")]
-    assert [e["seq"] for e in sse] == [e["seq"] for e in evs] and [e["event_id"] for e in sse] == [e["event_id"] for e in evs]
+    sse_bounded = [e for e in sse if e["seq"] <= max_seq]
+    assert [e["seq"] for e in sse_bounded] == [e["seq"] for e in list_evs], f"SSE seqs {[e['seq'] for e in sse_bounded]} != list seqs {[e['seq'] for e in list_evs]}"
+    assert [e["event_id"] for e in sse_bounded] == [e["event_id"] for e in list_evs]
+    assert len(sse) >= len(list_evs), "SSE must deliver at least as many events as the list"
 
 
 def test_clean_run_completes_when_runner_exits_zero(stack):

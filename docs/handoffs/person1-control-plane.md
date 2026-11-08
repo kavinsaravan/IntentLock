@@ -354,6 +354,20 @@ Milestone 7 results (2026-11-07), project venv, against `origin/kavinperson2bran
 - **Docker/Kiro:** NOT testable on this machine (Docker: `command not found`; Kiro: not installed). 4 of 12 security guarantees are ASSUMED from source code review, not tested (Docker isolation, Kiro tool exposure, trusted-test sandbox enforcement, MCP gateway bypass).
 - Intermittent flake did not occur; it remains UNRESOLVED.
 
+### Milestone 8 — integration failure fixes (2026-11-07)
+Two failures reported by Kavin after combining both branches into `integration/main` (437 passed, 2 failed, 3 skipped, 1 xpassed):
+
+**Fix 1: DynamoDB concurrency failure** (`test_event_seq_is_gapless_and_ordered_under_concurrency[dynamodb-moto]`)
+- Root cause: Moto's in-memory DynamoDB is not fully thread-safe. Concurrent `transact_write_items` calls can trigger `RuntimeError('dictionary changed size during iteration')` inside moto's internal dict iteration. Real AWS DynamoDB never raises `RuntimeError`.
+- Fix (`dynamo_store.py:append_event`): Added a `RuntimeError` catch in the retry loop, guarded by message check for the specific moto error. Retries as with `TransactionConflictException` — invalidates the seq hint, backs off, and retries, preserving gap-free event ordering. Non-matching `RuntimeError` is re-raised. No assertions weakened; no unnecessary locks added.
+- Test improvement (`test_store_contract.py:threads`): Now captures full tracebacks from worker threads (was: exception objects only) for better diagnostics on future failures.
+- Verification: 404 passed, 7 skipped on `Ali-Person-1`.
+
+**Fix 2: SSE event timing failure** (`test_launch_api_starts_real_runner_and_scenario_a_is_enforced`)
+- Root cause: The test read the event list (snapshot A), then opened an SSE stream (snapshot B). A late `agent_event` (e.g., launcher watcher's terminal event) arriving between these reads caused SSE to carry more events than the list snapshot.
+- Fix (`test_agent_launch_e2e.py`): Takes a fresh event list snapshot as the stable boundary AFTER the run is terminal and the runner has exited. Compares SSE events only within that bounded range (`seq <= max_seq`). Additionally asserts SSE delivers at least as many events as the list (no events lost). Preserves event ordering, consistency, and `Last-Event-ID` verification.
+- Verification: test passes deterministically.
+
 ## 12. Known Issues and Blockers
 - **No dashboard→real-Kiro run yet.** Kiro is not installed/authenticated on this machine; the procedure and an opt-in test exist (`tests/integration/README.md`). Person 2's real-Kiro result predates the launcher integration.
 - **TwinGuard sandbox and promoter are implemented** on Person 2's branch (`kavinperson2branch@8b119a8`): Docker sandbox, impact analyzer, and patch promoter are all present and their own tests pass. However, real exact-patch promotion through Docker and `TRUSTED_TEST_MODIFIED` sandbox enforcement are unverified end to end (Docker not available here).
