@@ -41,6 +41,8 @@ This is a **localhost** demo for security, platform, and DevOps teams that use c
 
    Keep the terminal open. The script builds `intentlock-twinguard:local`, creates a **fresh** temporary Git repository, starts the promoter on `127.0.0.1:8790`, the API on `127.0.0.1:8787`, and the dashboard on `http://localhost:5173/`. It prints the fresh base commit and private log directory. It does not print tokens. If using a screen recorder, show only the browser after startup.
 
+   The script refuses to start (exit code 2, including with `--check`) if any of ports 8787, 8790, or 5173 is already in use, and names the process holding it. Stop the earlier stack first. To run a second stack beside it, set `INTENTLOCK_DEMO_API_PORT`, `INTENTLOCK_DEMO_PROMOTER_PORT`, and `INTENTLOCK_DEMO_WEB_PORT` to free ports.
+
 ## Five-minute judge walkthrough
 
 | Time | Show | Say |
@@ -71,6 +73,7 @@ The dashboard defaults to reviewer `demo-user`. Use the `INTENTLOCK_REVIEWER_TOK
 | Kiro does not launch | `kiro-cli whoami`; dashboard launcher state; private agent log | Show the recorded real-Kiro evidence and explain the live setup issue. |
 | Docker preview fails | Docker Desktop and `docker info`; image build | Do not approve or promote. Show the recorded blocked/passing impact evidence. |
 | Reviewer action fails | Reviewer name `demo-user` and the private token | Retry with the same token; never bypass the review endpoint. |
+| Startup says a port is already in use | The process named in the message; `lsof -nP -iTCP:8787 -sTCP:LISTEN` | Stop the earlier demo stack and retry, or set the `INTENTLOCK_DEMO_*_PORT` variables. Do not use a stack you did not just start. |
 | API or UI unavailable | Printed private API/web logs; `http://127.0.0.1:8787/health` | Use the screenshots and architecture explanation. |
 
 The previous verified [browser flow](demo-evidence/README.md), [Person 2 handoff](handoffs/person2-execution-plane.md), and [sandbox README](../packages/sandbox-provider/README.md) contain the evidence and deeper implementation details. S3, DynamoDB, Lambda, and CloudWatch were checked separately; the local browser recording does not combine those AWS services in one deployed path.
