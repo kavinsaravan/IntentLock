@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { RunStatus } from "../lib/types";
 
-export function Badge({ tone, children }: { tone: "allow" | "deny" | "pending" | "stopped" | "review" | "info" | "ok"; children: ReactNode }) {
+export function Badge({ tone, children }: { tone: "allow" | "deny" | "pending" | "stopped" | "review" | "info" | "ok" | "na"; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 

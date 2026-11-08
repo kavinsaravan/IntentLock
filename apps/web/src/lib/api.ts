@@ -1,3 +1,4 @@
+import type { ReplayCatalog, ReplayView } from "./replay";
 import type { Contract, ContractDraft, EventRec, Health, ImpactReport, ImpactStatus, LauncherInfo, LaunchStatus, Run } from "./types";
 
 // Empty in dev => same-origin via the Vite proxy. Set VITE_API_URL for a deployed API.
@@ -86,4 +87,8 @@ export const api = {
     call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/${action}`, { ...post(b), headers: { "X-IntentLock-Reviewer-Token": token } }),
   promote: (id: string, b: { requested_by: string; patch_sha256: string }, token: string) =>
     call<Record<string, unknown>>(`/api/impact/${encodeURIComponent(id)}/promote`, { ...post(b), headers: { "X-IntentLock-Reviewer-Token": token } }),
+
+  replayRuns: () => call<ReplayCatalog>("/api/replay/runs"),
+  replayRun: (id: string, source = "auto") =>
+    call<ReplayView>(`/api/replay/runs/${encodeURIComponent(id)}${source !== "auto" ? `?source=${encodeURIComponent(source)}` : ""}`),
 };

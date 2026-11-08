@@ -3,6 +3,7 @@ import { Badge, Card, Json, Notice, Spinner, StatusPill, Stepper } from "../comp
 import { api, ApiError } from "../lib/api";
 import { findImpactReportId, latencyStats, toolEvents } from "../lib/events";
 import { fmtMs, fmtTime, shortSha } from "../lib/format";
+import { replayHref } from "../lib/replay";
 import type { Contract, ImpactReport, ImpactStatus } from "../lib/types";
 import { useRunLive } from "../lib/useRunLive";
 
@@ -42,7 +43,7 @@ export function FinalAudit({ runId }: { runId: string }) {
     <>
       <Stepper active={4} runId={runId} />
       {error && <Notice tone="warn" title="Backend error">{error}. Showing last known data.</Notice>}
-      <Card title="Outcome" right={<><StatusPill status={run.status} /> <button className="btn" onClick={exportJson}>Export JSON</button></>}>
+      <Card title="Outcome" right={<><StatusPill status={run.status} /> <a className="btn" href={replayHref(runId)}>Open Security Replay</a> <button className="btn" onClick={exportJson}>Export JSON</button></>}>
         <dl className="kv">
           <dt>Run</dt><dd><code>{run.run_id}</code></dd>
           <dt>Started / ended</dt><dd>{run.started_at ?? "—"} → {run.stopped_at ?? run.completed_at ?? "still active"}</dd>

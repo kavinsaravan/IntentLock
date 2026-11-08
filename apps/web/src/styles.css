@@ -61,3 +61,34 @@ input[type=checkbox] { width: auto; } textarea { resize: vertical; font-family: 
 .diff details { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; overflow: hidden; } .diff summary { padding: 6px 10px; background: var(--bg); cursor: pointer; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .diff table { width: 100%; border-collapse: collapse; } .diff pre { margin: 0; white-space: pre-wrap; word-break: break-all; } .diff .no { width: 40px; text-align: right; color: var(--muted); padding: 0 6px; user-select: none; font-size: 11.5px; } .diff .sign { width: 14px; }
 .dl-add { background: var(--add-bg); } .dl-del { background: var(--del-bg); } .dl-hunk { background: var(--info-bg); color: var(--info); }
+
+/* ---- navigation + Security Replay ---- */
+.nav { display: flex; gap: 14px; margin-right: auto; margin-left: 16px; } .nav a { color: var(--muted); text-decoration: none; font-weight: 600; } .nav a:hover { color: var(--accent); }
+.badge-na { background: transparent; color: var(--stop); border: 1px dashed var(--stop); padding: 0 7px; }
+.rp-head h1 { font-size: 22px; margin: 12px 0 2px; } .rp-head p { margin: 0 0 4px; }
+.rp-sources { display: flex; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+.rp-runs tr.on td { background: var(--info-bg); } .rp-runs td { vertical-align: middle; }
+.rp-outcome { border-radius: 12px; padding: 18px 20px; margin: 14px 0; border: 2px solid var(--line); background: var(--panel); }
+.rp-outcome h1 { font-size: 28px; margin: 2px 0 4px; } .rp-outcome p { margin: 0 0 10px; font-size: 15px; }
+.rp-outcome-k { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 700; color: var(--muted); }
+.rp-ok { border-color: var(--allow); background: var(--allow-bg); } .rp-ok h1 { color: var(--allow); }
+.rp-deny { border-color: var(--deny); background: var(--deny-bg); } .rp-deny h1 { color: var(--deny); }
+.rp-review, .rp-pending { border-color: var(--warn); background: var(--warn-bg); } .rp-review h1, .rp-pending h1 { color: var(--warn); }
+.rp-stopped, .rp-na { border-color: var(--stop); background: var(--stop-bg); } .rp-info { border-color: var(--info); background: var(--info-bg); }
+.rp-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+.rp-attempts { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.rp-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } @media (max-width: 760px) { .rp-checks { grid-template-columns: 1fr; } }
+.rp-check { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--bg); }
+.rp-check-h { display: flex; gap: 10px; align-items: flex-start; } .rp-check-h b { font-size: 16px; display: block; } .rp-check-h small { color: var(--muted); font-size: 12.5px; }
+.rp-num { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 800; }
+.rp-verdict { margin: 12px 0 6px; } .rp-verdict .badge { font-size: 15px; padding: 3px 14px; }
+.rp-timeline { list-style: none; padding: 0; margin: 0; }
+.rp-ti { border-left: 4px solid var(--line); padding: 8px 12px; margin: 6px 0; background: var(--bg); border-radius: 0 6px 6px 0; }
+.rp-ti-allow, .rp-ti-ok { border-color: var(--allow); } .rp-ti-deny { border-color: var(--deny); background: var(--deny-bg); } .rp-ti-review, .rp-ti-pending { border-color: var(--warn); } .rp-ti-info { border-color: var(--info); } .rp-ti-stopped, .rp-ti-na { border-color: var(--stop); }
+.rp-ti-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .rp-ti-detail { margin-top: 4px; font-size: 13px; }
+.rp-stage { min-width: 92px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; color: var(--muted); }
+.rp-when { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rp-out summary { cursor: pointer; margin-top: 8px; }
+.rp-runs code, .rp-runs .badge, .rp-tags code { white-space: nowrap; word-break: normal; } .rp-tags code { display: inline-block; margin: 2px 0; }
+.rp-picker { padding: 10px 16px; } .rp-picker summary { cursor: pointer; } .rp-picker-body { margin-top: 12px; }
+.rp-outcome .rp-meta + .rp-meta { margin-top: 6px; } .rp-outcome code { word-break: break-all; }
