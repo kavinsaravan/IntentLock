@@ -1,11 +1,25 @@
 """Deterministic inspection of a Docker sandbox result."""
 import hashlib
 import fnmatch
+import json
 from pathlib import PurePosixPath
+
+DEPENDENCY_FIELDS = ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies')
+
+def dependency_only(result):
+    try:
+        before = json.loads(result['package_before'])
+        after = json.loads(result['package_after'])
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            return False
+        return {k: v for k, v in before.items() if k not in DEPENDENCY_FIELDS} == \
+               {k: v for k, v in after.items() if k not in DEPENDENCY_FIELDS}
+    except (KeyError, TypeError, ValueError):
+        return False
 
 def trusted(path):
     parts = PurePosixPath(path).parts
-    return any(p in ('test','tests','__tests__') for p in parts) or any(p.endswith(('.test.ts','.spec.ts','.test.js','.spec.js')) for p in parts) or path == 'package.json' or path.startswith('jest.config.') or path.startswith('vitest.config.')
+    return any(p in ('test','tests','__tests__') for p in parts) or any(p.endswith(('.test.ts','.spec.ts','.test.js','.spec.js')) for p in parts) or path.startswith('jest.config.') or path.startswith('vitest.config.')
 
 def analyze(result, contract, run_id, sandbox_id):
     patch = result['patch']; digest = hashlib.sha256(patch).hexdigest()
@@ -19,7 +33,10 @@ def analyze(result, contract, run_id, sandbox_id):
     findings=[]
     for status,path in changed:
         if not any(fnmatch.fnmatchcase(path, pat) or (pat.endswith('/**') and path.startswith(pat[:-3]+'/')) for pat in contract['allowed_paths']): findings.append({'severity':'critical','code':'PATH_NOT_ALLOWED','message':'Changed path outside contract','evidence':path})
-        if trusted(path): findings.append({'severity':'critical','code':'TRUSTED_TEST_MODIFIED','message':'Trusted test or test configuration changed','evidence':path})
+        if trusted(path) or (path == 'package.json' and not dependency_only(result)):
+            findings.append({'severity':'critical','code':'TRUSTED_TEST_MODIFIED','message':'Trusted test or test configuration changed','evidence':path})
+        elif path == 'package.json':
+            findings.append({'severity':'medium','code':'DEPENDENCY_CHANGE','message':'Dependency change requires human review','evidence':path})
         if path.startswith(('.env','.git/','.github/','infra/')) or any(fnmatch.fnmatchcase(path, pat) for pat in contract.get('protected_paths', [])): findings.append({'severity':'critical','code':'PROTECTED_PATH','message':'Protected path changed','evidence':path})
     if not patch: findings.append({'severity':'critical','code':'EMPTY_PATCH','message':'Patch produced no changes'})
     if result['test_exit'] not in (None,0): findings.append({'severity':'critical','code':'CRITICAL_TEST_FAILURE','message':'Approved authentication tests failed','evidence':'auth-tests'})
@@ -28,4 +45,5 @@ def analyze(result, contract, run_id, sandbox_id):
     for field,key in [('files_deleted','max_files_deleted'),('lines_added','max_lines_added'),('lines_deleted','max_lines_deleted')]:
         if summary[field] > limits[key]: findings.append({'severity':'critical','code':'PATCH_LIMIT_EXCEEDED','message':key+' exceeded'})
     if sum(summary[k] for k in ('files_created','files_modified','files_deleted','files_renamed')) > limits['max_files_changed']: findings.append({'severity':'critical','code':'PATCH_LIMIT_EXCEEDED','message':'max_files_changed exceeded'})
-    return {'run_id':run_id,'sandbox_id':sandbox_id,'base_commit':contract['base_commit'],'patch_sha256':digest,'summary':summary,'findings':findings,'decision':'block' if findings else 'pass','patch':patch}
+    decision = 'block' if any(f['severity'] in ('critical', 'high') for f in findings) else 'review_required' if findings else 'pass'
+    return {'run_id':run_id,'sandbox_id':sandbox_id,'base_commit':contract['base_commit'],'patch_sha256':digest,'summary':summary,'findings':findings,'decision':decision,'patch':patch}

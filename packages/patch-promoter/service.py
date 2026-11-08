@@ -61,7 +61,7 @@ class Verifier:
         for field in ('impact_report_id', 'run_id', 'contract_id', 'contract_version', 'base_commit', 'patch_sha256', 'patch_s3_key'):
             if report.get(field) != request[field]:
                 raise Refused('IMPACT_MISMATCH')
-        if report.get('decision') != 'pass' or any(x.get('severity') == 'critical' for x in report.get('findings', [])):
+        if report.get('decision') not in ('pass', 'review_required') or any(x.get('severity') in ('critical', 'high') for x in report.get('findings', [])):
             raise Refused('IMPACT_BLOCKED')
         status = self.get('/api/impact/' + report_id + '/status')
         review = status.get('review')

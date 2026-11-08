@@ -29,6 +29,11 @@ from export_audit import export as export_audit
 
 @unittest.skipUnless(P1, 'Set INTENTLOCK_PERSON1_CHECKOUT')
 class TwinGuardApi(unittest.TestCase):
+    def setUp(self):
+        # The promoter deliberately applies without committing; each case starts from a clean demo tree.
+        subprocess.run(['git','-C',str(self.repo),'restore','--worktree','.'],check=True)
+        self.base = subprocess.check_output(['git','-C',str(self.repo),'rev-parse','HEAD']).decode().strip()
+
     @classmethod
     def setUpClass(cls):
         import uvicorn
@@ -135,6 +140,31 @@ class TwinGuardApi(unittest.TestCase):
         audit_key,audit_digest=export_audit(self.client,self.artifact_store,run['run_id'])
         self.assertEqual(audit_key,f"runs/{run['run_id']}/audit/final.json")
         self.assertEqual(len(audit_digest),64)
+
+    def test_zz_dependency_only_patch_requires_review_before_promotion(self):
+        source = self.repo/'src/auth/session.ts'
+        if '>= timeoutSeconds;' in source.read_text():
+            source.write_text(source.read_text().replace('>= timeoutSeconds;', '>= timeoutSeconds * 1000;'))
+            subprocess.run(['git','-C',str(self.repo),'add','src/auth/session.ts'],check=True)
+            subprocess.run(['git','-C',str(self.repo),'commit','-qm','fixed baseline'],check=True)
+        self.base = subprocess.check_output(['git','-C',str(self.repo),'rev-parse','HEAD']).decode().strip()
+        draft = json.loads((Path(P1)/'packages/contracts/fixtures/contract-draft.json').read_text())
+        draft['base_commit'] = self.base
+        draft['allowed_paths'] = ['package.json']
+        contract = self.client.request('/api/contracts',{'draft':draft,'approved':True,'approved_by':'reviewer'})
+        run = self.client.request('/api/runs',{'contract_id':contract['contract_id'],'contract_version':contract['version']})
+        package = self.repo/'package.json'
+        original = package.read_text()
+        package.write_text(original.replace(',"scripts":', ',"dependencies":{"left-pad":"1.3.0"},"scripts":'))
+        patch = subprocess.check_output(['git','-C',str(self.repo),'diff']).decode()
+        package.write_text(original)
+        report = preview(self.client,self.repo,run['run_id'],contract['contract_id'],contract['version'],patch)
+        self.assertEqual(report['decision'],'review_required')
+        path = '/api/impact/'+report['impact_report_id']
+        self.post(path+'/approve',{'reviewer':'reviewer','patch_sha256':report['patch_sha256'],'base_commit':self.base})
+        promoted = self.post(path+'/promote',{'requested_by':'reviewer','patch_sha256':report['patch_sha256']})
+        self.assertEqual(promoted['promotion']['status'],'promoted')
+        self.assertIn('"left-pad":"1.3.0"', package.read_text())
 
     @unittest.skipUnless(os.environ.get('INTENTLOCK_REAL_KIRO') == '1', 'Explicit real Kiro opt-in')
     def test_real_kiro_proposes_reviewed_patch(self):

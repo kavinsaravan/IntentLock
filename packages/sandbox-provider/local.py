@@ -120,6 +120,8 @@ def execute(repo, base, patch, *, run_test=True, timeout=60):
             raise SandboxError('SANDBOX_PATCH_FAILED')
         return {'patch': (out/'result.patch').read_bytes(), 'numstat': (out/'numstat.txt').read_text(),
                 'names': (out/'names.txt').read_text(),
+                'package_before': (out/'package-before.json').read_bytes() if (out/'package-before.json').exists() else None,
+                'package_after': (out/'package-after.json').read_bytes() if (out/'package-after.json').exists() else None,
                 'duration_ms': int((time.monotonic() - started) * 1000),
                 'test_exit': int((out/'test-exit.txt').read_text()) if (out/'test-exit.txt').exists() else None,
                 'test_output': (out/'test-output.txt').read_bytes() if (out/'test-output.txt').exists() else b''}

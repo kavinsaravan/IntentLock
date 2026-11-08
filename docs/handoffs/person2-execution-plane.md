@@ -1,5 +1,9 @@
 # Handoff — Person 2 execution plane
 
+## 2026-11-07 dependency review rule (newest Person 2 change)
+
+TwinGuard now distinguishes dependency-only `package.json` edits from changes to test scripts or other package fields. Dependency-only edits run the fixed `npm run test:auth`, produce a medium `DEPENDENCY_CHANGE` finding and `review_required` decision, and remain subject to authenticated human review, run/base/hash checks, and exact promotion. Test scripts/config remain critical `TRUSTED_TEST_MODIFIED` blocks and are never executed after modification. This aligns the shared `benign-dependency-bump` vector without weakening trusted-test protection. The full Person 2 suite passed against Ali's combined API: **34 tests, one skipped** (real Kiro opt-in). This includes a real Docker dependency test and a local HTTP API/promoter dependency-promotion test. No AWS resource changed in this milestone.
+
 ## 2026-11-07 post-merge verification of `main` (latest)
 
 `origin/main@de1d546` is a merge of `integration/main@a830c60`; their file trees were compared and are identical. Kavin verified the exact merged commit in a clean temporary worktree, rebuilt `intentlock-twinguard:local` from it, and used the integration virtual environment only for test dependencies. **All checks passed:** six real Docker tests (including no-network/read-only-root isolation, trusted-test blocking, unsafe patch blocking, Stop/tamper refusal, and reviewed safe promotion); one HTTP TwinGuard test with real S3 evidence (unsafe auth bypass blocked, corrected timeout patch promoted, final audit exported); and one authenticated real Kiro test with `INTENTLOCK_KIRO_GENERATE_PATCH=1` and S3 enabled (Kiro read and proposed through MCP, Docker ran trusted tests, the API recorded review, and the exact patch was promoted). Kiro was logged in; the S3 bucket was reachable.
