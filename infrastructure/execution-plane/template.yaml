@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IntentLock TwinGuard private evidence bucket and scoped artifact policies
+
+Resources:
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub intentlock-evidence-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Project
+          Value: IntentLock
+        - Key: Owner
+          Value: Person2
+
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EvidenceBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt EvidenceBucket.Arn
+              - !Sub '${EvidenceBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  ArtifactWriterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Write and verify IntentLock evidence objects
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub '${EvidenceBucket.Arn}/runs/*'
+
+  ArtifactReaderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read IntentLock evidence objects for review and promotion
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${EvidenceBucket.Arn}/runs/*'
+
+Outputs:
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  EvidenceBucketArn:
+    Value: !GetAtt EvidenceBucket.Arn
+  ArtifactWriterPolicyArn:
+    Value: !Ref ArtifactWriterPolicy
+  ArtifactReaderPolicyArn:
+    Value: !Ref ArtifactReaderPolicy

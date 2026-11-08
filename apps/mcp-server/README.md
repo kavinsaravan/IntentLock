@@ -1,0 +1,29 @@
+# IntentLock Kiro MCP execution plane
+
+The launcher gives Kiro an IntentLock-only MCP profile for controlled repository reads and patch proposals. Each tool call is authorized by the control plane. `@intentlock/propose_patch` previews a patch in the Docker TwinGuard sandbox and submits its impact report for human review; it does not alter the protected repository. See [the sandbox setup](../../packages/sandbox-provider/README.md).
+
+Set `INTENTLOCK_API_URL` to the localhost control plane, `INTENTLOCK_INTERNAL_TOKEN` to its internal token, and either `INTENTLOCK_ARTIFACT_DIR` or `INTENTLOCK_ARTIFACT_BUCKET`. For S3, also set `INTENTLOCK_AWS_PROFILE` if needed. The launcher passes only configured artifact settings to the MCP server; unset values are never forwarded as literal placeholders. Build the sandbox image and configure the promoter before proposing patches.
+
+After creating an approved contract and active run, launch:
+
+```sh
+.venv/bin/python -B apps/mcp-server/launch_kiro.py --repository /absolute/path/to/demo-repo --run-id RUN_ID --contract-id CONTRACT_ID --contract-version 1
+```
+
+Authenticate Kiro with `kiro-cli login` first. `KIRO_CLI_BINARY` can select an absolute binary path. `--print-profile` shows the generated profile without launching Kiro. The launcher selects Kiro V3 and starts the agent in a new process group. Its supervisor registers the PID, polls run state, handles SIGTERM, cleans up the process group, and reports `completed` or `failed` through the control plane's terminal-state endpoint. A stopped or blocked run stays terminal. If group signaling is denied, it falls back to signaling the direct process and reports failure; descendant cleanup then cannot be guaranteed.
+
+The control-plane HTTP timeout is two seconds, so polling is not a guaranteed sub-second stop mechanism. Tool authorization is checked separately on every call. Kiro itself runs outside Docker; Docker isolates the patch preview, not the Kiro process.
+
+## Verification
+
+```sh
+INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/isolated/Ali-checkout .venv/bin/python -B -m unittest discover -s tests/sandbox -v
+```
+
+The suite exercises the real local control-plane HTTP API, SIGTERM, stopped-run precedence, Docker isolation and patch promotion. The full authenticated Kiro workflow is opt in:
+
+```sh
+INTENTLOCK_PERSON1_CHECKOUT=/absolute/path/to/isolated/Ali-checkout INTENTLOCK_REAL_KIRO=1 INTENTLOCK_KIRO_GENERATE_PATCH=1 .venv/bin/python -B -m unittest discover -s tests/sandbox -p test_twinguard_api.py -k real_kiro -v
+```
+
+Set `INTENTLOCK_ARTIFACT_BUCKET` and `INTENTLOCK_AWS_PROFILE` to exercise live S3 evidence. The opt-in test uses real Kiro and MCP, Docker preview, human-review API calls and exact-hash promotion against a temporary Git repository. It does not automate browser clicks in the dashboard.
